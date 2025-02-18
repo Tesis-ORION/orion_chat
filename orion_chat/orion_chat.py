@@ -41,7 +41,6 @@ class OrionChatNode(Node):
         ros_msg = String()
         ros_msg.data = orion_response
         self.publisher.publish(ros_msg)
-        self.get_logger().info(f"Respuesta publicada: {orion_response}")
 
         self.is_processing = False
 
