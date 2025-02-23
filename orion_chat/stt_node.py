@@ -1,3 +1,4 @@
+import os
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -6,10 +7,7 @@ import speech_recognition as sr
 import pygame
 import time
 import tempfile
-import os
-import sys
-
-
+from ament_index_python.packages import get_package_share_directory
 
 
 class OrionSTTNode(Node):
@@ -29,9 +27,13 @@ class OrionSTTNode(Node):
 
     def play_activation_sound(self):
         try:
-            pygame.mixer.music.load("activation_sound.mp3")
+            # Obtener la ruta del directorio share del paquete "orion_chat"
+            pkg_share = get_package_share_directory("orion_chat")
+            # Construir la ruta completa hacia el archivo de audio
+            sound_path = os.path.join(pkg_share, "sounds", "activation_sound.mp3")
+            pygame.mixer.music.load(sound_path)
             pygame.mixer.music.play()
-            time.sleep(0.5)
+            time.sleep(0.2)
         except Exception as e:
             self.get_logger().error(f"Error al reproducir beep: {e}")
 
@@ -55,7 +57,7 @@ class OrionSTTNode(Node):
         return temp_file.name
 
     def listen_for_wake_word(self):
-        """Escucha hasta detectar la frase de activación."""
+        # Escucha hasta detectar la frase de activación.
         with self.microphone as source:
             self.get_logger().info("Esperando 'Hola ORION'...")
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
@@ -77,7 +79,7 @@ class OrionSTTNode(Node):
                     self.get_logger().error(f"Error en STT (wake word): {e}")
 
     def listen_and_publish(self):
-        """Escucha el comando del usuario y lo publica."""
+        # Escucha el comando del usuario y lo publica.
         with self.microphone as source:
             self.get_logger().info("Escuchando comando (máx. 10 s)...")
             # Reducimos el ajuste de ruido para que sea más rápido
@@ -95,7 +97,7 @@ class OrionSTTNode(Node):
                 self.get_logger().error(f"Error al transcribir el comando: {e}")
 
     def run(self):
-        """Bucle principal del nodo STT."""
+        #Bucle principal del nodo STT.
         while rclpy.ok():
             self.listen_for_wake_word()
             self.listen_and_publish()

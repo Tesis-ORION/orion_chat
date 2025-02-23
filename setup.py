@@ -12,6 +12,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob.glob('launch/*.py')),
+        ('share/' + package_name + '/sounds', glob.glob('sounds/*.mp3')),
 
     ],
     install_requires=['setuptools'],
