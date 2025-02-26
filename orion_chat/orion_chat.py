@@ -8,6 +8,7 @@ import re
 from collections import deque
 from ament_index_python.packages import get_package_share_directory
 
+
 class OrionChatNode(Node):
     def __init__(self):
         super().__init__("orion_chat")
@@ -31,6 +32,8 @@ class OrionChatNode(Node):
         )
         # Cargar recursos externos (JSON) desde la carpeta 'resources'
         self.load_rag_resources()
+
+        # Variables para evitar duplicados
 
         self.last_message = None
         self.is_processing = False
@@ -92,7 +95,6 @@ class OrionChatNode(Node):
         ros_msg = String()
         ros_msg.data = orion_response
         self.publisher.publish(ros_msg)
-
         # Agregar la respuesta al historial
         self.chat_history.append(f"ORION: {orion_response}")
 
@@ -111,7 +113,7 @@ class OrionChatNode(Node):
         return prompt
 
     def get_orion_response(self, augmented_prompt):
-        # Definir un system prompt interno para mayor detalle (puedes mantenerlo o removerlo)
+
         system_prompt = (
             "Eres ORION, un robot avanzado diseñado para la interacción humano-robot en educación e investigación. "
             "Tu personalidad es inteligente, amigable y con un toque de humor robótico. "
@@ -140,6 +142,7 @@ class OrionChatNode(Node):
             return "[ORION]: Error en ORION"
 
     def clean_ollama_response(self, response):
+
         response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
         if "[ORION]:" in response:
             response = response.split("[ORION]:", 1)[-1].strip()

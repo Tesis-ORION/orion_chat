@@ -14,6 +14,7 @@ class OrionSTTNode(Node):
     def __init__(self):
         super().__init__("orion_stt")
         self.publisher = self.create_publisher(String, "orion_input", 10)
+        # Inicializamos el recognizer solo para capturar audio (sin STT remoto)
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         pygame.mixer.init()
@@ -49,6 +50,18 @@ class OrionSTTNode(Node):
         self.play_activation_sound()
         # No se utiliza phrase_time_limit para que se grabe hasta que se detecte un silencio prolongado
         audio = self.recognizer.listen(source)
+        wav_data = audio.get_wav_data()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        with open(temp_file.name, "wb") as f:
+            f.write(wav_data)
+        return temp_file.name
+
+    def record_audio_to_file(self, source, timeout=None):
+        # Capturamos audio usando la fuente ya abierta
+        self.recognizer.adjust_for_ambient_noise(source, duration=0.1)
+        self.get_logger().info("Grabando audio...")
+        self.play_activation_sound()
+        audio = self.recognizer.listen(source, phrase_time_limit=timeout)
         wav_data = audio.get_wav_data()
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         with open(temp_file.name, "wb") as f:
