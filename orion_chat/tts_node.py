@@ -1,3 +1,4 @@
+import re
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -17,8 +18,8 @@ class OrionTTSNode(Node):
         pygame.mixer.init()
 
     def clean_orion_prefix(self, text):
-        """ Elimina '[ORION]:' si está presente en el mensaje """
-        return text.replace("[ORION]:", "").strip()
+        # Reemplaza tanto "[ORION: ]" (con o sin espacios internos) como "[ORION]:" por cadena vacía.
+        return re.sub(r'(\[ORION:\s*\]|\[ORION\]:)', '', text).strip()
 
     def listener_callback(self, msg):
         text = self.clean_orion_prefix(msg.data)  # Limpiar la respuesta antes de hablar
@@ -53,3 +54,5 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
+
+

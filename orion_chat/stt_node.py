@@ -1,3 +1,4 @@
+import os
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -6,11 +7,8 @@ import speech_recognition as sr
 import pygame
 import time
 import tempfile
-import os
-import sys
-
-
-
+from ament_index_python.packages import get_package_share_directory
+import difflib  
 
 class OrionSTTNode(Node):
     def __init__(self):
@@ -20,27 +18,43 @@ class OrionSTTNode(Node):
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         pygame.mixer.init()
-        self.wake_words = [
-            "hola orion", "hola orión", "hola oriom", "hola oriam", "ola orion",
-            "hola horion", "hola horyon", "hola oryan", "hola orían", "hola oriana", "hola, orión.", "hola orian"
-        ]
-        # Cargar el modelo Whisper local para español (por ejemplo, "small")
+        # Definir la palabra de activación objetivo y el umbral de similitud
+        self.target_wake_word = "hola orion"
+        self.wake_threshold = 0.8  # Umbral ajustable
+        # Cargar el modelo Whisper local para español
         self.whisper_model = whisper.load_model("small") 
 
     def play_activation_sound(self):
         try:
-            pygame.mixer.music.load("activation_sound.mp3")
+            pkg_share = get_package_share_directory("orion_chat")
+            sound_path = os.path.join(pkg_share, "sounds", "activation_sound.mp3")
+            pygame.mixer.music.load(sound_path)
             pygame.mixer.music.play()
-            time.sleep(0.5)
+            time.sleep(0.2)
         except Exception as e:
             self.get_logger().error(f"Error al reproducir beep: {e}")
 
     def is_wake_word_detected(self, text):
         text = text.lower().strip()
-        for wake_word in self.wake_words:
-            if wake_word in text:
-                return True
-        return False
+        # Calcula el ratio de similitud entre la transcripción y la palabra de activación
+        ratio = difflib.SequenceMatcher(None, text, self.target_wake_word).ratio()
+        return ratio >= self.wake_threshold
+
+    def record_audio_to_file(self, source):
+        # Ajuste del ruido ambiental
+        self.recognizer.adjust_for_ambient_noise(source, duration=0.1)
+        # Ajustar pause_threshold para que espere un silencio mayor antes de cortar la grabación
+        self.recognizer.pause_threshold = 1.0  # Valor aumentado para permitir pausas sin cortar
+        self.recognizer.non_speaking_duration = 0.5
+        self.get_logger().info("Grabando audio (esperando a que finalice la frase)...")
+        self.play_activation_sound()
+        # No se utiliza phrase_time_limit para que se grabe hasta que se detecte un silencio prolongado
+        audio = self.recognizer.listen(source)
+        wav_data = audio.get_wav_data()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        with open(temp_file.name, "wb") as f:
+            f.write(wav_data)
+        return temp_file.name
 
     def record_audio_to_file(self, source, timeout=None):
         # Capturamos audio usando la fuente ya abierta
@@ -55,39 +69,34 @@ class OrionSTTNode(Node):
         return temp_file.name
 
     def listen_for_wake_word(self):
-        """Escucha hasta detectar la frase de activación."""
         with self.microphone as source:
-            self.get_logger().info("Esperando 'Hola ORION'...")
+            self.get_logger().info("Ajustando ruido ambiental para detectar 'Hola ORION'...")
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            self.get_logger().info("¡Listo para escuchar la palabra de activación!")
             while True:
                 try:
                     audio = self.recognizer.listen(source)
                     wav_data = audio.get_wav_data()
-                    # Guardamos temporalmente para transcribir
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
                         temp_file.write(wav_data)
                         temp_file_path = temp_file.name
-                    # Transcribe con Whisper, forzando el idioma español
                     result = self.whisper_model.transcribe(temp_file_path, language="es")
                     text = result["text"].strip().lower()
                     if self.is_wake_word_detected(text):
-                        self.get_logger().info("¡Activado! Preparando para comando...")
+                        self.get_logger().info("¡Palabra de activación detectada! Preparando para comando...")
                         return
                 except Exception as e:
                     self.get_logger().error(f"Error en STT (wake word): {e}")
 
     def listen_and_publish(self):
-        """Escucha el comando del usuario y lo publica."""
         with self.microphone as source:
-            self.get_logger().info("Escuchando comando (máx. 10 s)...")
-            # Reducimos el ajuste de ruido para que sea más rápido
+            self.get_logger().info("Ajustando ruido ambiental para escuchar comando...")
             self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
-            # Señalamos que el sistema ya está listo
+            self.get_logger().info("¡Listo para escuchar comando! (Se grabará hasta detectar silencio prolongado)")
             try:
-                audio_file = self.record_audio_to_file(source, timeout=10)
+                audio_file = self.record_audio_to_file(source)
                 result = self.whisper_model.transcribe(audio_file, language="es")
                 text = result["text"].strip()
-                self.get_logger().info(f"Comando: {text}")
                 msg = String()
                 msg.data = text
                 self.publisher.publish(msg)
@@ -95,7 +104,6 @@ class OrionSTTNode(Node):
                 self.get_logger().error(f"Error al transcribir el comando: {e}")
 
     def run(self):
-        """Bucle principal del nodo STT."""
         while rclpy.ok():
             self.listen_for_wake_word()
             self.listen_and_publish()
