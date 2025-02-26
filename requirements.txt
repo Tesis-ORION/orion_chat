@@ -3,3 +3,4 @@ openai-whisper>=1.0.0
 SpeechRecognition>=3.14.1
 pygame>=2.0.0
 gTTS>=2.2.3
+PyAudio>=0.2.14
