@@ -1,5 +1,22 @@
 import glob
+import os
 from setuptools import find_packages, setup
+
+def get_data_files(src_folder, install_folder):
+    """
+    Recorre src_folder y devuelve una lista de tuplas para data_files,
+    preservando la estructura de directorios relativa en install_folder.
+    """
+    data_files = []
+    for root, dirs, files in os.walk(src_folder):
+        if files:
+            # Calcula la ruta relativa respecto a src_folder
+            rel_path = os.path.relpath(root, src_folder)
+            # Si es la carpeta base, usamos install_folder; si no, concatenamos
+            dest = os.path.join(install_folder, rel_path) if rel_path != "." else install_folder
+            file_list = [os.path.join(root, f) for f in files]
+            data_files.append((dest, file_list))
+    return data_files
 
 package_name = 'orion_chat'
 
@@ -15,7 +32,7 @@ setup(
         ('share/' + package_name + '/sounds', glob.glob('sounds/*.mp3')),
         ('share/' + package_name + '/resource', glob.glob('resource/*.json')),
 
-    ],
+    ] + get_data_files('model', os.path.join('share', package_name, 'model')),
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='alexoberco',
@@ -31,3 +48,4 @@ setup(
         ],
     },
 )
+
