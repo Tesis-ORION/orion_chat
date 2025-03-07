@@ -7,6 +7,7 @@ import requests
 import re
 from collections import deque
 from ament_index_python.packages import get_package_share_directory
+import time
 
 class OrionChatNode(Node):
     def __init__(self):
@@ -21,7 +22,7 @@ class OrionChatNode(Node):
         # Memoria rotacional para los últimos 10 intercambios (chat)
         self.chat_history = deque(maxlen=10)
         
-        # Valores predeterminados (en caso de que no se carguen recursos externos)
+        # Valores predeterminados
         self.external_document = (
             "Información predeterminada: No se cargaron documentos externos."
         )
@@ -29,18 +30,11 @@ class OrionChatNode(Node):
             "Eres ORION, un robot avanzado con una personalidad inteligente, amigable y con un toque de humor. "
             "Respondes de forma precisa y basada en datos verificados."
         )
-        # Cargar recursos externos (JSON) desde la carpeta 'resources'
         self.load_rag_resources()
-
         self.last_message = None
         self.is_processing = False
 
     def load_rag_resources(self):
-        """
-        Carga todos los archivos JSON de la carpeta 'resources' del paquete 'orion_chat'.
-        Si alguno contiene la clave 'system_prompt', sobrescribe el system_prompt.
-        Si contienen 'external_document', los concatena en un único bloque.
-        """
         try:
             pkg_share = get_package_share_directory("orion_chat")
             resources_dir = os.path.join(pkg_share, "resource")
@@ -73,6 +67,7 @@ class OrionChatNode(Node):
             self.get_logger().warn("No se encontró la carpeta 'resources' en el paquete.")
 
     def listener_callback(self, msg):
+        # Evitar mensajes duplicados o si ya se está procesando
         if msg.data == self.last_message or self.is_processing:
             return
         self.is_processing = True
@@ -81,25 +76,18 @@ class OrionChatNode(Node):
         user_message = msg.data
         self.get_logger().info(f"Recibido en ROS: {user_message}")
 
-        # Agregar el mensaje del usuario al historial
+        # Actualizar historial
         self.chat_history.append(f"Usuario: {user_message}")
 
-        # Generar el prompt aumentado con historial y documentos externos
+        # Generar prompt aumentado
         augmented_prompt = self.generate_augmented_prompt(user_message)
-        orion_response = self.get_orion_response(augmented_prompt)
-
-        # Publicar la respuesta de ORION
-        ros_msg = String()
-        ros_msg.data = orion_response
-        self.publisher.publish(ros_msg)
-
-        # Agregar la respuesta al historial
-        self.chat_history.append(f"ORION: {orion_response}")
+        # Llamada en streaming al LLM
+        self.get_logger().info("Llamando al LLM en modo streaming...")
+        self.process_stream(augmented_prompt)
 
         self.is_processing = False
 
     def generate_augmented_prompt(self, user_message):
-        # Concatenar el historial de los últimos 10 intercambios
         history_text = "\n".join(list(self.chat_history))
         prompt = (
             f"{self.system_prompt}\n\n"
@@ -110,8 +98,7 @@ class OrionChatNode(Node):
         )
         return prompt
 
-    def get_orion_response(self, augmented_prompt):
-        # Definir un system prompt interno para mayor detalle (puedes mantenerlo o removerlo)
+    def process_stream(self, augmented_prompt):
         system_prompt = (
             "Eres ORION, un robot avanzado diseñado para la interacción humano-robot en educación e investigación. "
             "Tu personalidad es inteligente, amigable y con un toque de humor robótico. "
@@ -122,28 +109,54 @@ class OrionChatNode(Node):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": augmented_prompt}
         ]
+        payload = {
+            "model": "llama3.2:3b",
+            "messages": messages,
+            "stream": True
+        }
+        url = "http://localhost:11434/api/chat"
         try:
-            payload = {
-                "model": "llama3.2:3b",
-                "messages": messages,
-                "stream": False
-            }
-            url = "http://localhost:11434/api/chat"
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, stream=True)
             response.raise_for_status()
-            data = response.json()
-            full_response = data["message"]["content"]
-            clean_response = self.clean_ollama_response(full_response)
-            return clean_response
         except Exception as e:
             self.get_logger().error(f"Error al comunicarse con Ollama: {e}")
-            return "[ORION]: Error en ORION"
+            return
 
-    def clean_ollama_response(self, response):
-        response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
-        if "[ORION]:" in response:
-            response = response.split("[ORION]:", 1)[-1].strip()
-        return f"[ORION]: {response}"
+        buffer = ""
+        punctuation_marks = {'.', ',', '!', '?'}
+        self.get_logger().info("Respuesta del LLM (streaming):")
+        token_found = False
+        for line in response.iter_lines(decode_unicode=True):
+            if line:
+                token_found = True
+                try:
+                    data = json.loads(line)
+                    token = data.get("token")
+                    if token is None:
+                        message = data.get("message")
+                        if message and isinstance(message, dict):
+                            token = message.get("content", "")
+                    print(token, end='', flush=True)
+                    buffer += token
+                    if token and token[-1] in punctuation_marks:
+                        phrase = buffer.strip()
+                        self.get_logger().info(f"\n[Publicando a TTS]: {phrase}")
+                        ros_msg = String()
+                        ros_msg.data = phrase
+                        self.publisher.publish(ros_msg)
+                        self.chat_history.append(f"ORION: {phrase}")
+                        buffer = ""
+                except Exception as e:
+                    self.get_logger().error(f"Error procesando stream: {e}")
+        if not token_found:
+            self.get_logger().warn("No se recibió token del LLM.")
+        if buffer:
+            phrase = buffer.strip()
+            self.get_logger().info(f"\n[Publicando a TTS]: {phrase}")
+            ros_msg = String()
+            ros_msg.data = phrase
+            self.publisher.publish(ros_msg)
+            self.chat_history.append(f"ORION: {phrase}")
 
 def main(args=None):
     rclpy.init(args=args)
