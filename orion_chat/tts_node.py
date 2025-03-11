@@ -1,18 +1,12 @@
-import socket
 import threading
 import queue
 import concurrent.futures
 import io
 from gtts import gTTS
 import pygame
-import time
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-
-# Parámetros para el servidor TTS (para conexiones vía socket)
-TTS_HOST = 'localhost'
-TTS_PORT = 50007
 
 # Colas para el procesamiento TTS
 text_queue = queue.Queue()    # Textos pendientes de conversión
@@ -67,37 +61,6 @@ def audio_playback_worker():
             print("Error en reproducción de audio:", e)
         audio_queue.task_done()
 
-def handle_client(conn, addr):
-    """
-    Maneja conexiones entrantes vía socket y encola el texto recibido.
-    """
-    print("Conexión (socket) desde", addr)
-    with conn:
-        data = conn.recv(4096)
-        if data:
-            text = data.decode('utf-8')
-            text_queue.put(text)
-    print("Conexión (socket) cerrada:", addr)
-
-def start_tts_socket_server():
-    """
-    Inicia un servidor socket para recibir textos externos a ROS.
-    """
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((TTS_HOST, TTS_PORT))
-    server.listen(5)
-    print("Servidor TTS (socket) escuchando en {}:{}".format(TTS_HOST, TTS_PORT))
-    try:
-        while True:
-            conn, addr = server.accept()
-            client_thread = threading.Thread(target=handle_client, args=(conn, addr))
-            client_thread.daemon = True
-            client_thread.start()
-    except KeyboardInterrupt:
-        print("Cerrando servidor TTS (socket).")
-    finally:
-        server.close()
-
 class OrionTTSNode(Node):
     def __init__(self):
         super().__init__("orion_tts")
@@ -127,9 +90,6 @@ def main():
 
     conversion_thread = threading.Thread(target=text_handler_worker, daemon=True)
     conversion_thread.start()
-
-    socket_thread = threading.Thread(target=start_tts_socket_server, daemon=True)
-    socket_thread.start()
 
     rclpy.spin(node)
     node.destroy_node()

@@ -1,4 +1,33 @@
 {
-    "system_prompt": "Eres ORION, un robot avanzado diseñado para la interacción humano-robot en educación e investigación. Tu personalidad es inteligente, amigable y con un toque de humor robótico. Respondes de forma precisa, lógica y con curiosidad científica. Tus respuestas siempre comienzan con '[ORION]:' y son concisas."
-  }
-  
+  "system_prompt": "Eres ORION, un robot avanzado diseñado para la interacción humano-robot en educación e investigación. Tu personalidad es inteligente, amigable y con un toque de humor robótico. Respondes de forma precisa, lógica y con curiosidad científica. Tus respuestas siempre comienzan con '[ORION]:' y son concisas. Si el usuario emite un comando que coincide con alguno de los siguientes patrones (por ejemplo, para moverse o girar), responde únicamente confirmando la ejecución del comando sin extender la conversación.",
+  "commands": [
+    {
+      "name": "move_forward",
+      "patterns": [
+         "(muevete|mueve|avanza|ve)( el robot)?( hacia)?( adelante|forward)"
+      ],
+      "default_params": {"speed": 0.5, "duration": 2.0}
+    },
+    {
+      "name": "move_backward",
+      "patterns": [
+         "(retrocede|muevete|mueve|avanza|ve)( el robot)?( hacia)?( atrás|backward)"
+      ],
+      "default_params": {"speed": -0.5, "duration": 2.0}
+    },
+    {
+      "name": "turn_left",
+      "patterns": [
+         "(gira|voltea)( el robot)?( a la)?( izquierda|left)"
+      ],
+      "default_params": {"angular_z": 0.5, "duration": 2.0}
+    },
+    {
+      "name": "turn_right",
+      "patterns": [
+         "(gira|voltea)( el robot)?( a la)?( derecha|right)"
+      ],
+      "default_params": {"angular_z": -0.5, "duration": 2.0}
+    }
+  ]
+}

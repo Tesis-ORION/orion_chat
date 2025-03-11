@@ -31,6 +31,7 @@ setup(
         ('share/' + package_name + '/launch', glob.glob('launch/*.py')),
         ('share/' + package_name + '/sounds', glob.glob('sounds/*.mp3')),
         ('share/' + package_name + '/resource', glob.glob('resource/*.json')),
+        ('share/' + package_name + '/orion_chat', glob.glob('orion_chat/*.py')),
 
     ] + get_data_files('model', os.path.join('share', package_name, 'model')),
     install_requires=['setuptools'],
@@ -45,6 +46,8 @@ setup(
             'orion_chat = orion_chat.orion_chat:main',  # Nodo de chat principal
             'orion_tts = orion_chat.tts_node:main',  # Nodo de Text-to-Speech
             'orion_stt = orion_chat.stt_node:main',  # Nodo de Speech-to-Text
+            'rosa_controller = orion_chat.rosa_controller:main',  # Nodo de control de ROSA
+            'vehicle_agent = orion_chat.vehicle_agent:main',  # Nodo del agente de
         ],
     },
 )
