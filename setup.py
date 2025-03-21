@@ -32,6 +32,7 @@ setup(
         ('share/' + package_name + '/sounds', glob.glob('sounds/*.mp3')),
         ('share/' + package_name + '/resource', glob.glob('resource/*.json')),
         ('share/' + package_name + '/orion_chat', glob.glob('orion_chat/*.py')),
+        ('share/' + package_name + '/worlds', glob.glob('worlds/*.sdf'))
 
     ] + get_data_files('model', os.path.join('share', package_name, 'model')),
     install_requires=['setuptools'],

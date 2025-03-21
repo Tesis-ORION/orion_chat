@@ -16,7 +16,7 @@ class OrionSTTNode(Node):
         super().__init__('orion_stt')
         self.publisher_ = self.create_publisher(String, 'orion_input', 10)
         # Define la palabra de activación y su umbral de similitud
-        self.wake_word = "hola orion"
+        self.wake_word = "orion"
         self.wake_threshold = 0.8
         pygame.mixer.init()
         pkg_share = get_package_share_directory('orion_chat')
@@ -34,9 +34,14 @@ class OrionSTTNode(Node):
         self.get_logger().info("Stream de audio iniciado.")
 
     def is_wake_word(self, text):
+        # Convertir a minúsculas y separar en palabras
         text = text.lower().strip()
-        ratio = difflib.SequenceMatcher(None, text, self.wake_word).ratio()
-        return ratio >= self.wake_threshold
+        words = text.split()
+        for word in words:
+            ratio = difflib.SequenceMatcher(None, word, self.wake_word).ratio()
+            if ratio >= self.wake_threshold:
+                return True
+        return False
     
     def play_activation_sound(self):
         try:

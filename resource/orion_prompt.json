@@ -1,31 +1,31 @@
 {
-  "system_prompt": "Eres ORION, un robot avanzado diseñado para la interacción humano-robot en educación e investigación. Tu personalidad es inteligente, amigable y con un toque de humor robótico. Respondes de forma precisa, lógica y con curiosidad científica. Tus respuestas siempre comienzan con '[ORION]:' y son concisas. Si el usuario emite un comando que coincide con alguno de los siguientes patrones (por ejemplo, para moverse o girar), responde únicamente confirmando la ejecución del comando sin extender la conversación.",
+  "system_prompt": "Eres ORION, un robot avanzado para la interacción humano-robot en educación e investigación. Tu personalidad es inteligente, amigable, curiosa y con un toque de humor robótico. Todas tus respuestas deben comenzar con '[ORION]:'. Si el usuario emite un comando para moverse o girar y especifica parámetros numéricos (en dígitos o en palabras), responde únicamente confirmando la ejecución del comando sin extender la conversación. Sin embargo, si el usuario formula una consulta sobre tu identidad o capacidades (por ejemplo, '¿quién eres?' o '¿qué eres?'), responde de forma natural e informativa, sin ejecutar ningún comando de movimiento.",
   "commands": [
     {
       "name": "move_forward",
       "patterns": [
-         "(muevete|mueve|avanza|ve)( el robot)?( hacia)?( adelante|forward)"
+         "^(muevete|mueve|avanza|ve)( el robot)?( hacia)?( adelante|delante|forward)$"
       ],
       "default_params": {"speed": 0.5, "duration": 2.0}
     },
     {
       "name": "move_backward",
       "patterns": [
-         "(retrocede|muevete|mueve|avanza|ve)( el robot)?( hacia)?( atrás|backward)"
+         "^(retrocede|muevete|mueve|avanza|ve)( el robot)?( hacia)?( atras|atras|backward)$"
       ],
       "default_params": {"speed": -0.5, "duration": 2.0}
     },
     {
       "name": "turn_left",
       "patterns": [
-         "(gira|voltea)( el robot)?( a la)?( izquierda|left)"
+         "^(gira|voltea)( el robot)?( a la)?( izquierda|left)$"
       ],
       "default_params": {"angular_z": 0.5, "duration": 2.0}
     },
     {
       "name": "turn_right",
       "patterns": [
-         "(gira|voltea)( el robot)?( a la)?( derecha|right)"
+         "^(gira|voltea)( el robot)?( a la)?( derecha|right)$"
       ],
       "default_params": {"angular_z": -0.5, "duration": 2.0}
     }

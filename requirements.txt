@@ -6,3 +6,4 @@ gTTS>=2.2.3
 PyAudio>=0.2.14
 vosk >= 0.3.45
 jpl-rosa 
+text2num
