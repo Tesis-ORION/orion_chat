@@ -117,8 +117,6 @@ class OrionChatNode(Node):
         self.process_stream(augmented_prompt)
         self.is_processing = False
 
-
-
     def check_native_command(self, message: str) -> bool:
         parsed = self.parse_command_from_text(message)
         if parsed:
@@ -195,23 +193,29 @@ class OrionChatNode(Node):
             # En caso de error, tratamos de manera conservadora como conversación.
             return "conversacion"
 
-
     def extract_parameters(self, text: str, command: dict):
-        # Extraer duración (por ejemplo "tres segundos")
+        # EXTRAER duración: busca expresiones como "tres segundos" o "4 segundos"
+        duration = None
         duration_pattern = r"(?P<duration>(?:\d+(?:\.\d+)?|\w+))\s*(?:segundo|segundos)"
         duration_match = re.search(duration_pattern, text)
-        duration = None
         if duration_match:
             duration_str = duration_match.group("duration")
             duration = convert_number(duration_str)
-        # Buscar velocidad explícita ("velocidad de 4")
-        speed_pattern = r"(?:velocidad\s*(?:de)?\s*)(?P<speed>(?:\d+(?:\.\d+)?|\w+))"
-        speed_match = re.search(speed_pattern, text)
+        # EXTRAER velocidad: primero busca expresiones específicas como "a cinco metros" o "a 5 m/s"
         speed = None
+        speed_pattern = r"(?:a|a\s+una|a\s+un)\s+(?P<speed>(?:\d+(?:\.\d+)?|\w+))\s*(?:metros|m\/s)"
+        speed_match = re.search(speed_pattern, text)
         if speed_match:
             speed_str = speed_match.group("speed")
             speed = convert_number(speed_str)
-        # Si no se detecta velocidad por palabra clave, buscar de forma genérica en el texto restante
+        # Si no se encuentra la velocidad en ese formato, busca la palabra clave "velocidad"
+        if speed is None:
+            explicit_speed_pattern = r"(?:velocidad\s*(?:de)?\s*)(?P<speed>(?:\d+(?:\.\d+)?|\w+))"
+            speed_match = re.search(explicit_speed_pattern, text)
+            if speed_match:
+                speed_str = speed_match.group("speed")
+                speed = convert_number(speed_str)
+        # Si sigue sin detectarse, busca cualquier número genérico (excluyendo el que ya se usó para la duración)
         if speed is None:
             text_without_duration = re.sub(duration_pattern, "", text)
             matches = re.findall(r"((?:\d+(?:\.\d+)?)|\w+)", text_without_duration)
@@ -281,7 +285,6 @@ class OrionChatNode(Node):
             f"Responde de forma natural y conversacional."
         )
         return prompt
-
 
     def process_stream(self, augmented_prompt):
         system_prompt = (
@@ -373,7 +376,6 @@ class OrionChatNode(Node):
                 ros_msg.data = phrase
                 self.response_pub.publish(ros_msg)
                 self.chat_history.append(f"ORION: {phrase}")
-
 
 def main(args=None):
     rclpy.init(args=args)
