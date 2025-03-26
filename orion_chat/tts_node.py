@@ -44,7 +44,7 @@ def text_handler_worker():
 
 def audio_playback_worker():
     
-    #Extrae audios convertidos de la cola y los reproduce secuencialmente.
+    # Extrae audios convertidos de la cola y los reproduce secuencialmente.
     
     pygame.mixer.init()
     while True:
