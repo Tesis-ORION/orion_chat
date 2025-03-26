@@ -7,15 +7,12 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Directorio share del paquete orion_chat
     orion_chat_share = get_package_share_directory('orion_chat')
     
-    # 1. Incluir el launch orion_launch.py del paquete orion_chat
     orion_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(orion_chat_share, 'launch', 'orion_launch.py'))
     )
     
-    # 2. Nodo del ros_gz_bridge para el topic cmd_vel
     parameter_bridge_node = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -25,8 +22,6 @@ def generate_launch_description():
         output='screen'
     )
     
-    # 3. Lanzar Gazebo (gz_sim.launch.py) del paquete ros_gz_sim con el world file ubicado en el share del paquete orion_chat
-    # Se asume que el archivo del mundo se encuentra en orion_chat/worlds/car_world.sdf
     world_file = os.path.join(orion_chat_share, 'worlds', 'car_world.sdf')
     ros_gz_sim_share = get_package_share_directory('ros_gz_sim')
     gz_sim_launch = IncludeLaunchDescription(
@@ -34,7 +29,6 @@ def generate_launch_description():
         launch_arguments={'gz_args': f"{world_file} -r"}.items()
     )
     
-    # 4. Spawnear la entidad usando gz_spawn_model.launch.py del paquete ros_gz_sim_demos
     ros_gz_sim_demos_share = get_package_share_directory('ros_gz_sim_demos')
     model_file = os.path.join(ros_gz_sim_demos_share, 'models', 'vehicle', 'model.sdf')
     spawn_model_launch = IncludeLaunchDescription(

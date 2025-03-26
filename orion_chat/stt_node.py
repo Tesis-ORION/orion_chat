@@ -22,7 +22,7 @@ class OrionSTTNode(Node):
         pkg_share = get_package_share_directory('orion_chat')
         model_path = os.path.join(pkg_share, 'model', 'vosk-model-small-es-0.42')
         if not os.path.exists(model_path):
-            self.get_logger().error(f"El modelo no se encontró en {model_path}. Descárgalo y extráelo allí.")
+            self.get_logger().error(f"El modelo no se encontró en {model_path}.")
             sys.exit(1)
         self.model = Model(model_path)
         self.get_logger().info("Modelo Vosk cargado correctamente.")
@@ -71,7 +71,7 @@ class OrionSTTNode(Node):
     def listen_for_command(self, duration=5):
         self.play_activation_sound()
         self.get_logger().info("Grabando comando...")
-        # Reiniciamos el recognizer para capturar el comando (reset de estado)
+        # Reinicia el recognizer para capturar el comando (reset de estado)
         recognizer = KaldiRecognizer(self.model, 16000)
         start_time = time.time()
         command_text = ""

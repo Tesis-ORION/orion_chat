@@ -29,7 +29,6 @@ def convert_number(text):
         except Exception:
             return None
 
-# --- Capa de Movimiento basada en LLM ---
 class MovementLayer:
     def __init__(self, config, cmd_vel_publisher, node_logger):
         self.cmd_vel_pub = cmd_vel_publisher
@@ -39,18 +38,19 @@ class MovementLayer:
 
     def process_movement_command(self, message: str):
         """
-        Utiliza el LLM para generar un comando de movimiento en formato JSON y lo ejecuta.
-        Se espera que el LLM devuelva algo como:
-        {"linear_x": 0.5, "angular_z": 0.0, "duration": 5.0}
+        Utiliza el LLM para generar comando(s) de movimiento en formato JSON y los ejecuta.
+        Si el comando es simple, se espera un objeto JSON:
+          {"linear_x": 0.5, "angular_z": 0.0, "duration": 5.0}
+        Si es compuesto, se espera un arreglo JSON de dichos objetos.
         """
         system_prompt = self.config.get("system_prompt", "")
-        messages = [
+        messages_payload = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": message}
         ]
         payload = {
             "model": self.config.get("model", "llama3.2:3b"),
-            "messages": messages,
+            "messages": messages_payload,
             "stream": False
         }
         url = "http://localhost:11434/api/chat"
@@ -58,7 +58,6 @@ class MovementLayer:
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            # Se intenta extraer el contenido generado por el LLM
             content = ""
             if "message" in data and isinstance(data["message"], dict):
                 content = data["message"].get("content", "")
@@ -66,33 +65,65 @@ class MovementLayer:
                 content = data["response"]
             content = content.strip()
             self.logger.info(f"Respuesta del LLM para movimiento: {content}")
-            # Parsear el contenido como JSON
             command = json.loads(content)
-            linear_x = float(command.get("linear_x", self.config.get("default_linear_speed", 0.5)))
-            angular_z = float(command.get("angular_z", self.config.get("default_angular_speed", 0.5)))
-            duration = float(command.get("duration", self.config.get("default_duration", 5.0)))
         except Exception as e:
             self.logger.error(f"Error procesando comando de movimiento: {e}")
             return None, f"Error procesando comando de movimiento: {e}"
-        
-        # Publicar el mensaje Twist
-        twist = Twist()
-        twist.linear.x = linear_x
-        twist.angular.z = angular_z
-        self.cmd_vel_pub.publish(twist)
-        # Programar la detención tras 'duration' segundos (si es mayor que 0)
-        if duration > 0:
-            def stop_robot():
-                stop_twist = Twist()
-                stop_twist.linear.x = 0.0
-                stop_twist.angular.z = 0.0
-                self.cmd_vel_pub.publish(stop_twist)
-            self.stop_timer = threading.Timer(duration, stop_robot)
-            self.stop_timer.daemon = True
-            self.stop_timer.start()
-        return command, f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}."
 
-# --- Nodo principal que integra Conversación y Movimiento ---
+        # Función auxiliar para ejecutar un único comando
+        def execute_single_command(cmd):
+            # Extraer parámetros con validaciones:
+            if "linear_x" in cmd:
+                linear_x = float(cmd["linear_x"])
+            else:
+                # Si se trata de giro y no se define linear_x, asignar 0.
+                if "angular_z" in cmd and float(cmd["angular_z"]) != 0:
+                    linear_x = 0.0
+                else:
+                    linear_x = self.config.get("default_linear_speed", 0.5)
+            if "angular_z" in cmd:
+                angular_z = float(cmd["angular_z"])
+            else:
+                # Si se trata de movimiento lineal y no se define angular_z, asignar 0.
+                if "linear_x" in cmd and float(cmd["linear_x"]) != 0:
+                    angular_z = 0.0
+                else:
+                    angular_z = self.config.get("default_angular_speed", 0.5)
+            duration = float(cmd.get("duration", self.config.get("default_duration", 5.0)))
+            twist = Twist()
+            twist.linear.x = linear_x
+            twist.angular.z = angular_z
+            self.cmd_vel_pub.publish(twist)
+            # Programar la detención tras 'duration' segundos si es mayor que 0
+            if duration > 0:
+                def stop_robot():
+                    stop_twist = Twist()
+                    stop_twist.linear.x = 0.0
+                    stop_twist.angular.z = 0.0
+                    self.cmd_vel_pub.publish(stop_twist)
+                self.stop_timer = threading.Timer(duration, stop_robot)
+                self.stop_timer.daemon = True
+                self.stop_timer.start()
+            return f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}."
+
+        # Verificar si se trata de un comando compuesto (lista) o simple (objeto)
+        if isinstance(command, list):
+            responses = []
+            for cmd in command:
+                resp = execute_single_command(cmd)
+                responses.append(resp)
+                # Esperar la duración de este comando antes de ejecutar el siguiente
+                try:
+                    dur = float(cmd.get("duration", self.config.get("default_duration", 5.0)))
+                except Exception:
+                    dur = self.config.get("default_duration", 5.0)
+                time.sleep(dur + 0.1)
+            combined_response = " ".join(responses)
+            return command, combined_response
+        else:
+            resp = execute_single_command(command)
+            return command, resp
+
 class OrionChatMovementNode(Node):
     def __init__(self):
         super().__init__("orion_chat_movement")
@@ -110,7 +141,7 @@ class OrionChatMovementNode(Node):
 
         self.movement_layer = MovementLayer(self.movement_config, self.cmd_vel_pub, self.get_logger())
 
-        # Frases clave para cambiar de modo (se evaluarán por coincidencia exacta)
+        # Frases clave para cambiar de modo
         self.activate_movement_phrases = ["modo movimiento", "modo de movimiento", "muevete", "muévete", "quiero que te muevas", "hora de moverse"]
         self.activate_conversation_phrases = ["modo conversación", "modo conversacion", "hablar contigo", "quiero hablar"]
 
@@ -149,11 +180,11 @@ class OrionChatMovementNode(Node):
         self.chat_history.append(f"Usuario: {user_message}")
         user_message_lower = user_message.lower().strip()
 
-        # Verificar si se solicita cambio de modo (evaluación exacta)
+        # Verificar si se solicita cambio de modo
         if user_message_lower in self.activate_movement_phrases:
             if self.current_mode != "movement":
                 self.current_mode = "movement"
-                response = "Cambiando a modo movimiento. Ahora la IA creará los comandos de movimiento automáticamente."
+                response = "Cambiando a modo movimiento."
             else:
                 response = "Ya estoy en modo movimiento."
             self.publish_response(response)
@@ -172,7 +203,7 @@ class OrionChatMovementNode(Node):
 
         # Procesar según el modo actual
         if self.current_mode == "movement":
-            # En modo movimiento, la IA genera el JSON con los comandos y se publican
+            # En modo movimiento, la IA genera el JSON con el/los comando(s) y se publican
             command, response = self.movement_layer.process_movement_command(user_message)
             self.publish_response(response)
         else:

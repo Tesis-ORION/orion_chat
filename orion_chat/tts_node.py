@@ -13,9 +13,9 @@ text_queue = queue.Queue()    # Textos pendientes de conversión
 audio_queue = queue.Queue()   # Audios (bytes) convertidos
 
 def tts_conversion_worker(text):
-    """
-    Convierte el texto a audio usando gTTS y retorna los datos de audio (bytes).
-    """
+    
+    # Convierte el texto a audio usando gTTS y retorna los datos de audio (bytes).
+    
     try:
         print("[TTS Conversion] Procesando texto:", text)
         tts = gTTS(text=text, lang="es", slow=False)
@@ -28,9 +28,9 @@ def tts_conversion_worker(text):
         return None
 
 def text_handler_worker():
-    """
-    Extrae textos de la cola, los procesa a audio de forma concurrente y coloca el audio resultante en la cola.
-    """
+    
+    # Extrae textos de la cola, los procesa a audio de forma concurrente y coloca el audio resultante en la cola.
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         while True:
             text = text_queue.get()
@@ -43,9 +43,9 @@ def text_handler_worker():
             text_queue.task_done()
 
 def audio_playback_worker():
-    """
-    Extrae audios convertidos de la cola y los reproduce secuencialmente.
-    """
+    
+    #Extrae audios convertidos de la cola y los reproduce secuencialmente.
+    
     pygame.mixer.init()
     while True:
         audio_data = audio_queue.get()
