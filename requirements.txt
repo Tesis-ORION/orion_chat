@@ -6,3 +6,5 @@ gTTS
 PyAudio
 jpl-rosa 
 text2num
+Flask
+flask-cors
