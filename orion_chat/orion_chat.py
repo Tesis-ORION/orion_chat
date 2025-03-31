@@ -12,6 +12,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 import requests
+from text_to_num import text2num
 
 def remove_accents(input_str):
     """Elimina acentos y caracteres diacríticos de la cadena."""
@@ -24,7 +25,6 @@ def convert_number(text):
         return float(text)
     except ValueError:
         try:
-            from text_to_num import text2num
             return float(text2num(text, "es"))
         except Exception:
             return None
