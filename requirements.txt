@@ -1,9 +1,8 @@
-requests>=2.25.0
+requests
 openai-whisper
-SpeechRecognition>=3.14.1
-pygame>=2.0.0
-gTTS>=2.2.3
-PyAudio>=0.2.14
-vosk >= 0.3.45
+SpeechRecognition
+pygame
+gTTS
+PyAudio
 jpl-rosa 
 text2num
