@@ -13,6 +13,7 @@ from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 import requests
 from text_to_num import text2num
+import difflib
 
 def remove_accents(input_str):
     """Elimina acentos y caracteres diacríticos de la cadena."""
@@ -49,7 +50,7 @@ class MovementLayer:
             {"role": "user", "content": message}
         ]
         payload = {
-            "model": self.config.get("model", "llama3.2:3b"),
+            "model": self.config.get("model", "llama3.1"),
             "messages": messages_payload,
             "stream": False
         }
@@ -142,8 +143,8 @@ class OrionChatMovementNode(Node):
         self.movement_layer = MovementLayer(self.movement_config, self.cmd_vel_pub, self.get_logger())
 
         # Frases clave para cambiar de modo
-        self.activate_movement_phrases = ["modo movimiento", "modo de movimiento", "muevete", "muévete", "quiero que te muevas", "hora de moverse"]
-        self.activate_conversation_phrases = ["modo conversación", "modo conversacion", "hablar contigo", "quiero hablar"]
+        self.activate_movement_phrases = ["preparate.", "preparate", "Preparate", "Preparate.", "Prepárate."]
+        self.activate_conversation_phrases = ["Hablemos.", "Quiero hablar."]
 
         self.get_logger().info("Nodo iniciado en modo conversación.")
 
@@ -179,9 +180,11 @@ class OrionChatMovementNode(Node):
         self.get_logger().info(f"Recibido: {user_message}")
         self.chat_history.append(f"Usuario: {user_message}")
         user_message_lower = user_message.lower().strip()
+        normalized_user_message = remove_accents(user_message_lower)
 
-        # Verificar si se solicita cambio de modo
-        if user_message_lower in self.activate_movement_phrases:
+        # Verificar si se solicita cambio de modo usando coincidencia difusa con normalización y treshold
+        normalized_movement_phrases = [remove_accents(phrase.lower()) for phrase in self.activate_movement_phrases]
+        if difflib.get_close_matches(normalized_user_message, normalized_movement_phrases, n=1, cutoff=0.8):
             if self.current_mode != "movement":
                 self.current_mode = "movement"
                 response = "Cambiando a modo movimiento."
@@ -191,7 +194,8 @@ class OrionChatMovementNode(Node):
             self.is_processing = False
             return
 
-        if user_message_lower in self.activate_conversation_phrases:
+        normalized_conversation_phrases = [remove_accents(phrase.lower()) for phrase in self.activate_conversation_phrases]
+        if difflib.get_close_matches(normalized_user_message, normalized_conversation_phrases, n=1, cutoff=0.8):
             if self.current_mode != "conversation":
                 self.current_mode = "conversation"
                 response = "Cambiando a modo conversación. Podemos seguir dialogando normalmente."
@@ -236,7 +240,7 @@ class OrionChatMovementNode(Node):
             {"role": "user", "content": augmented_prompt}
         ]
         payload = {
-            "model": self.conversation_config.get("model", "llama3.2:3b"),
+            "model": self.conversation_config.get("model", "llama3.1"),
             "messages": messages,
             "stream": True
         }
