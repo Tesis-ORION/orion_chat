@@ -17,9 +17,9 @@ class OrionSTTNode(Node):
         self.publisher_ = self.create_publisher(String, 'orion_input', 10)
         
         # Cargar el modelo Whisper de OpenAI
-        self.get_logger().info("Cargando modelo Whisper...")
-        self.whisper_model = whisper.load_model("small")
-        self.get_logger().info("Modelo Whisper cargado correctamente.")
+        self.get_logger().info("Cargando modelo Whisper en modo CPU...")
+        self.whisper_model = whisper.load_model("small", device="cpu")
+        self.get_logger().info("Modelo Whisper cargado correctamente en modo CPU.")
 
         # Configurar la aplicación Flask
         self.app = Flask(__name__)
