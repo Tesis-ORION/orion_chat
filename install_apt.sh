@@ -6,4 +6,5 @@ sudo apt install -y alsa-utils
 sudo apt install -y ffmpeg
 sudo apt install -y ros-jazzy-ros2-control
 sudo apt install -y ros-jazzy-ros2-controllers
- sudo apt install ros-jazzy-ros-gz
+sudo apt install ros-jazzy-ros-gz
+

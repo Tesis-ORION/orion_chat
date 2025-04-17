@@ -4,6 +4,7 @@ import concurrent.futures
 import io
 from gtts import gTTS
 import pygame
+import re
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -73,7 +74,6 @@ class OrionTTSNode(Node):
         self.get_logger().info("Nodo TTS iniciado, esperando mensajes en 'orion_response'.")
 
     def clean_orion_prefix(self, text):
-        import re
         return re.sub(r'(\[ORION:\s*\]|\[ORION\]:)', '', text).strip()
 
     def listener_callback(self, msg):
@@ -97,3 +97,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
