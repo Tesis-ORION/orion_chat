@@ -5,6 +5,10 @@
 ## 🚀 Overview
 **Orion Chat** is a ROS 2 Jazzy package that orchestrates speech‑to‑text (STT), chat engine, and text‑to‑speech (TTS) nodes using a single launch file. It runs on Ubuntu 24.04 with support for Ignition Harmonic simulation, integrating Whisper for STT, OLLAMA for language processing, and gTTS for TTS, enabling seamless human–robot interaction.
 
+https://github.com/user-attachments/assets/bf1b94ce-0228-48e8-b0cc-685e6ba14beb
+
+
+
 ## ⚙️ Prerequisites
 - **OS:** Ubuntu 24.04 LTS  
 - **ROS 2:** Jazzy Jalisco (`ros-jazzy-desktop`)  
