@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import json
-import re
 import time
 import threading
 from collections import deque
@@ -39,10 +38,9 @@ class MovementLayer:
 
     def process_movement_command(self, message: str):
         """
-        Utiliza el LLM para generar comando(s) de movimiento en formato JSON y los ejecuta.
-        Si el comando es simple, se espera un objeto JSON:
-          {"linear_x": 0.5, "angular_z": 0.0, "duration": 5.0}
-        Si es compuesto, se espera un arreglo JSON de dichos objetos.
+        Llama al LLM para obtener comando(s) de movimiento en formato JSON.
+        Se espera que la respuesta sea un objeto JSON simple o un arreglo JSON.
+        Inmediatamente lanza la ejecución de los comandos en un hilo.
         """
         system_prompt = self.config.get("system_prompt", "")
         messages_payload = [
@@ -50,7 +48,7 @@ class MovementLayer:
             {"role": "user", "content": message}
         ]
         payload = {
-            "model": self.config.get("model", "llama3.1"),
+            "model": "qwen2.5:3b",
             "messages": messages_payload,
             "stream": False
         }
@@ -68,33 +66,49 @@ class MovementLayer:
             self.logger.info(f"Respuesta del LLM para movimiento: {content}")
             command = json.loads(content)
         except Exception as e:
-            self.logger.error(f"Error procesando comando de movimiento: {e}")
-            return None, f"Error procesando comando de movimiento: {e}"
+            err_msg = f"Error procesando comando de movimiento: {e}"
+            self.logger.error(err_msg)
+            return None, err_msg
 
-        # Función auxiliar para ejecutar un único comando
+        # Lanzar la ejecución de comandos en un hilo para no bloquear
+        threading.Thread(target=self.execute_commands, args=(command,)).start()
+        # Retornamos el comando y un mensaje interno de que se inició la ejecución
+        return command, "Comando recibido y en ejecución."
+
+    def execute_commands(self, command):
+        """
+        Ejecuta el/los comando(s) recibidos (JSON) de forma secuencial.
+        Cada comando se ejecuta publicando el mensaje de Twist y se programa
+        la detención mediante un Timer sin bloquear el hilo principal.
+        """
         def execute_single_command(cmd):
-            # Extraer parámetros con validaciones:
-            if "linear_x" in cmd:
-                linear_x = float(cmd["linear_x"])
-            else:
-                # Si se trata de giro y no se define linear_x, asignar 0.
-                if "angular_z" in cmd and float(cmd["angular_z"]) != 0:
-                    linear_x = 0.0
+            try:
+                if "linear_x" in cmd:
+                    linear_x = float(cmd["linear_x"])
                 else:
-                    linear_x = self.config.get("default_linear_speed", 0.5)
-            if "angular_z" in cmd:
-                angular_z = float(cmd["angular_z"])
-            else:
-                # Si se trata de movimiento lineal y no se define angular_z, asignar 0.
-                if "linear_x" in cmd and float(cmd["linear_x"]) != 0:
-                    angular_z = 0.0
+                    # Si es giro y no se define linear_x, usar 0.
+                    if "angular_z" in cmd and float(cmd["angular_z"]) != 0:
+                        linear_x = 0.0
+                    else:
+                        linear_x = self.config.get("default_linear_speed", 0.5)
+                if "angular_z" in cmd:
+                    angular_z = float(cmd["angular_z"])
                 else:
-                    angular_z = self.config.get("default_angular_speed", 0.5)
-            duration = float(cmd.get("duration", self.config.get("default_duration", 5.0)))
+                    if "linear_x" in cmd and float(cmd["linear_x"]) != 0:
+                        angular_z = 0.0
+                    else:
+                        angular_z = self.config.get("default_angular_speed", 0.5)
+                duration = float(cmd.get("duration", self.config.get("default_duration", 5.0)))
+            except Exception as e:
+                self.logger.error(f"Error procesando los parámetros del comando: {e}")
+                return
+
             twist = Twist()
             twist.linear.x = linear_x
             twist.angular.z = angular_z
             self.cmd_vel_pub.publish(twist)
+            self.logger.info(f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}")
+
             # Programar la detención tras 'duration' segundos si es mayor que 0
             if duration > 0:
                 def stop_robot():
@@ -102,28 +116,21 @@ class MovementLayer:
                     stop_twist.linear.x = 0.0
                     stop_twist.angular.z = 0.0
                     self.cmd_vel_pub.publish(stop_twist)
+                    self.logger.info("Comando finalizado, robot detenido.")
                 self.stop_timer = threading.Timer(duration, stop_robot)
                 self.stop_timer.daemon = True
                 self.stop_timer.start()
-            return f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}."
-
-        # Verificar si se trata de un comando compuesto (lista) o simple (objeto)
+        # Si se trata de varios comandos
         if isinstance(command, list):
-            responses = []
             for cmd in command:
-                resp = execute_single_command(cmd)
-                responses.append(resp)
-                # Esperar la duración de este comando antes de ejecutar el siguiente
+                execute_single_command(cmd)
                 try:
                     dur = float(cmd.get("duration", self.config.get("default_duration", 5.0)))
                 except Exception:
                     dur = self.config.get("default_duration", 5.0)
                 time.sleep(dur + 0.1)
-            combined_response = " ".join(responses)
-            return command, combined_response
         else:
-            resp = execute_single_command(command)
-            return command, resp
+            execute_single_command(command)
 
 class OrionChatMovementNode(Node):
     def __init__(self):
@@ -182,7 +189,7 @@ class OrionChatMovementNode(Node):
         user_message_lower = user_message.lower().strip()
         normalized_user_message = remove_accents(user_message_lower)
 
-        # Verificar si se solicita cambio de modo usando coincidencia difusa con normalización y treshold
+        # Verificar cambio de modo con coincidencia difusa
         normalized_movement_phrases = [remove_accents(phrase.lower()) for phrase in self.activate_movement_phrases]
         if difflib.get_close_matches(normalized_user_message, normalized_movement_phrases, n=1, cutoff=0.8):
             if self.current_mode != "movement":
@@ -207,14 +214,61 @@ class OrionChatMovementNode(Node):
 
         # Procesar según el modo actual
         if self.current_mode == "movement":
-            # En modo movimiento, la IA genera el JSON con el/los comando(s) y se publican
-            command, response = self.movement_layer.process_movement_command(user_message)
-            self.publish_response(response)
+            # En modo movimiento, se lanza el procesamiento en un hilo
+            threading.Thread(target=self.handle_movement_command, args=(user_message,)).start()
+            self.is_processing = False
+            return
         else:
-            # Modo conversación: genera prompt aumentado y usa streaming para la respuesta
             augmented_prompt = self.generate_augmented_prompt(user_message)
             self.process_stream(augmented_prompt)
         self.is_processing = False
+
+    def handle_movement_command(self, user_message):
+        """
+        Procesa el mensaje en modo movimiento:
+          1. Obtiene el/los comando(s) LLM en formato JSON y lanza su ejecución de forma asíncrona.
+          2. En paralelo, solicita al LLM una respuesta natural basada en el mensaje del usuario.
+        """
+        # Llamada al LLM para obtener comando(s) y lanzar su ejecución (no espera a que se terminen)
+        command, internal_msg = self.movement_layer.process_movement_command(user_message)
+        self.get_logger().info(f"Comando JSON recibido: {command}")
+
+        # Lanzar en otro hilo la solicitud de confirmación en lenguaje natural,
+        # utilizando únicamente el mensaje original del usuario.
+        threading.Thread(target=self.send_natural_confirmation, args=(user_message,)).start()
+
+    def send_natural_confirmation(self, user_message):
+        """
+        Solicita al LLM que responda en lenguaje natural confirmando la acción a partir del mensaje original.
+        La respuesta se publica en el tópico de salida.
+        """
+        confirmation_prompt = (
+            "Responde de forma natural confirmando la acción de movimiento, sin incluir datos técnicos. "
+            f"El usuario indicó: '{user_message}'."
+        )
+        payload = {
+            "model": "llama3.1",
+            "messages": [
+                {"role": "system", "content": "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."},
+                {"role": "user", "content": confirmation_prompt}
+            ],
+            "stream": False
+        }
+        url = "http://localhost:11434/api/chat"
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            content = ""
+            if "message" in data and isinstance(data["message"], dict):
+                content = data["message"].get("content", "")
+            elif "response" in data:
+                content = data["response"]
+            content = content.strip()
+        except Exception as e:
+            content = f"Error al obtener confirmación: {e}"
+        # Publicar solo la respuesta natural (para TTS)
+        self.publish_response(content)
 
     def generate_augmented_prompt(self, user_message):
         history_text = "\n".join(list(self.chat_history))
@@ -230,17 +284,15 @@ class OrionChatMovementNode(Node):
         return prompt
 
     def process_stream(self, augmented_prompt):
-        """
-        Envía la solicitud a la API LLM en modo streaming y publica fragmentos en TTS
-        al detectar signos de puntuación.
-        """
+        self.streaming_mode = True
+        self.first_stream_message_sent = False  # Reiniciamos para la nueva respuesta en streaming
         system_prompt = self.conversation_config.get("system_prompt", "")
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": augmented_prompt}
         ]
         payload = {
-            "model": self.conversation_config.get("model", "llama3.1"),
+            "model": "llama3.1",
             "messages": messages,
             "stream": True
         }
@@ -280,13 +332,25 @@ class OrionChatMovementNode(Node):
             phrase = buffer.strip()
             self.publish_response(phrase)
             self.chat_history.append(f"ORION: {phrase}")
+        self.streaming_mode = False  # Finalizamos el modo streaming al terminar
+
 
     def publish_response(self, text: str):
-        """Publica la respuesta en el tópico de salida (TTS)."""
+        """Publica la respuesta (solo lenguaje natural) en el tópico de salida (TTS)."""
         msg = String()
-        msg.data = text
+        if getattr(self, 'streaming_mode', False):
+            # Si estamos en streaming, solo al primer mensaje se le agrega el prefijo
+            if not getattr(self, 'first_stream_message_sent', False):
+                msg.data = f"[ORION]: {text}"
+                self.first_stream_message_sent = True
+            else:
+                msg.data = text
+        else:
+            # Para respuestas que no son streaming, se agrega el prefijo siempre.
+            msg.data = f"[ORION]: {text}"
         self.response_pub.publish(msg)
-        self.get_logger().info(f"Respuesta: {text}")
+        self.get_logger().info(f"Respuesta publicada: {msg.data}")
+
 
 def main(args=None):
     rclpy.init(args=args)

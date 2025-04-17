@@ -49,6 +49,7 @@ setup(
             'orion_stt = orion_chat.stt_node:main',  # Nodo de Speech-to-Text
             'rosa_controller = orion_chat.rosa_controller:main',  # Nodo de control de ROSA
             'vehicle_agent = orion_chat.vehicle_agent:main',  # Nodo del agente de
+            'audio_recorder = orion_chat.audio_recorder:main',  # Nodo del grabador de audio
         ],
     },
 )
