@@ -1,119 +1,92 @@
 import os
+import sys
+import json
+import time
+import threading
+import tempfile
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from flask import Flask, request, jsonify
 import whisper
-import speech_recognition as sr
-import pygame
-import time
-import tempfile
-from ament_index_python.packages import get_package_share_directory
-import difflib  
+from flask_cors import CORS  # Importa Flask-CORS
 
 class OrionSTTNode(Node):
     def __init__(self):
-        super().__init__("orion_stt")
-        self.publisher = self.create_publisher(String, "orion_input", 10)
-        # Inicializamos el recognizer solo para capturar audio (sin STT remoto)
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        pygame.mixer.init()
-        # Definir la palabra de activación objetivo y el umbral de similitud
-        self.target_wake_word = "hola orion"
-        self.wake_threshold = 0.8  # Umbral ajustable
-        # Cargar el modelo Whisper local para español
-        self.whisper_model = whisper.load_model("small") 
+        super().__init__('orion_stt')
+        self.publisher_ = self.create_publisher(String, 'orion_input', 10)
+        
+        # Cargar el modelo Whisper de OpenAI
+        self.get_logger().info("Cargando modelo Whisper en modo CPU...")
+        self.whisper_model = whisper.load_model("small", device="cpu")
+        self.get_logger().info("Modelo Whisper cargado correctamente en modo CPU.")
 
-    def play_activation_sound(self):
-        try:
-            pkg_share = get_package_share_directory("orion_chat")
-            sound_path = os.path.join(pkg_share, "sounds", "activation_sound.mp3")
-            pygame.mixer.music.load(sound_path)
-            pygame.mixer.music.play()
-            time.sleep(0.2)
-        except Exception as e:
-            self.get_logger().error(f"Error al reproducir beep: {e}")
+        # Configurar la aplicación Flask
+        self.app = Flask(__name__)
+        CORS(self.app)  # Habilita CORS para todas las rutas
 
-    def is_wake_word_detected(self, text):
-        text = text.lower().strip()
-        # Calcula el ratio de similitud entre la transcripción y la palabra de activación
-        ratio = difflib.SequenceMatcher(None, text, self.target_wake_word).ratio()
-        return ratio >= self.wake_threshold
+        self.setup_routes()
 
-    def record_audio_to_file(self, source):
-        # Ajuste del ruido ambiental
-        self.recognizer.adjust_for_ambient_noise(source, duration=0.1)
-        # Ajustar pause_threshold para que espere un silencio mayor antes de cortar la grabación
-        self.recognizer.pause_threshold = 1.0  # Valor aumentado para permitir pausas sin cortar
-        self.recognizer.non_speaking_duration = 0.5
-        self.get_logger().info("Grabando audio (esperando a que finalice la frase)...")
-        self.play_activation_sound()
-        # No se utiliza phrase_time_limit para que se grabe hasta que se detecte un silencio prolongado
-        audio = self.recognizer.listen(source)
-        wav_data = audio.get_wav_data()
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        with open(temp_file.name, "wb") as f:
-            f.write(wav_data)
-        return temp_file.name
+        # Ejecutar Flask en un hilo separado
+        self.flask_thread = threading.Thread(target=self.run_flask, daemon=True)
+        self.flask_thread.start()
+        self.get_logger().info("Servidor Flask iniciado en hilo separado.")
 
-    def record_audio_to_file(self, source, timeout=None):
-        # Capturamos audio usando la fuente ya abierta
-        self.recognizer.adjust_for_ambient_noise(source, duration=0.1)
-        self.get_logger().info("Grabando audio...")
-        self.play_activation_sound()
-        audio = self.recognizer.listen(source, phrase_time_limit=timeout)
-        wav_data = audio.get_wav_data()
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        with open(temp_file.name, "wb") as f:
-            f.write(wav_data)
-        return temp_file.name
+    def setup_routes(self):
+        @self.app.route('/upload', methods=['POST'])
+        def upload_audio():
+            if 'file' not in request.files:
+                return jsonify({"error": "No se encontró el archivo en la solicitud"}), 400
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({"error": "No se seleccionó ningún archivo"}), 400
+            
+            # Guardar el archivo de audio de forma temporal
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                file.save(tmp)
+                tmp_path = tmp.name
 
-    def listen_for_wake_word(self):
-        with self.microphone as source:
-            self.get_logger().info("Ajustando ruido ambiental para detectar 'Hola ORION'...")
-            self.recognizer.adjust_for_ambient_noise(source, duration=1)
-            self.get_logger().info("¡Listo para escuchar la palabra de activación!")
-            while True:
-                try:
-                    audio = self.recognizer.listen(source)
-                    wav_data = audio.get_wav_data()
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-                        temp_file.write(wav_data)
-                        temp_file_path = temp_file.name
-                    result = self.whisper_model.transcribe(temp_file_path, language="es")
-                    text = result["text"].strip().lower()
-                    if self.is_wake_word_detected(text):
-                        self.get_logger().info("¡Palabra de activación detectada! Preparando para comando...")
-                        return
-                except Exception as e:
-                    self.get_logger().error(f"Error en STT (wake word): {e}")
+            self.get_logger().info(f"Archivo recibido: {tmp_path}")
 
-    def listen_and_publish(self):
-        with self.microphone as source:
-            self.get_logger().info("Ajustando ruido ambiental para escuchar comando...")
-            self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
-            self.get_logger().info("¡Listo para escuchar comando! (Se grabará hasta detectar silencio prolongado)")
             try:
-                audio_file = self.record_audio_to_file(source)
-                result = self.whisper_model.transcribe(audio_file, language="es")
-                text = result["text"].strip()
-                msg = String()
-                msg.data = text
-                self.publisher.publish(msg)
+                # Transcribir el audio usando Whisper
+                result = self.whisper_model.transcribe(tmp_path)
+                transcript = result.get("text", "").strip()
+                self.get_logger().info(f"Transcripción: {transcript}")
+
+                # Publicar el comando transcrito en el tópico ROS
+                if transcript:
+                    msg = String()
+                    msg.data = transcript
+                    self.publisher_.publish(msg)
+                    self.get_logger().info("Mensaje publicado en 'orion_input'.")
+                else:
+                    self.get_logger().info("No se obtuvo transcripción del audio.")
+
+                # Eliminar el archivo temporal
+                os.remove(tmp_path)
+                return jsonify({"transcript": transcript}), 200
             except Exception as e:
-                self.get_logger().error(f"Error al transcribir el comando: {e}")
+                self.get_logger().error(f"Error al procesar el audio: {e}")
+                return jsonify({"error": str(e)}), 500
+
+    def run_flask(self):
+        # Ejecutar la aplicación Flask en el puerto 5000
+        self.app.run(host='0.0.0.0', port=5000)
 
     def run(self):
-        while rclpy.ok():
-            self.listen_for_wake_word()
-            self.listen_and_publish()
+        rclpy.spin(self)
 
 def main(args=None):
     rclpy.init(args=args)
     node = OrionSTTNode()
-    node.run()
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        node.run()
+    except KeyboardInterrupt:
+        node.get_logger().info("Terminando nodo por interrupción manual.")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
