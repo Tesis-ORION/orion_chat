@@ -15,7 +15,10 @@ def generate_launch_description():
     )
 
     gz_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(orion_gz_share, 'launch', 'gz_ros.launch.py'))
+        PythonLaunchDescriptionSource(os.path.join(orion_gz_share, 'launch', 'gz_ros.launch.py')),
+        launch_arguments={
+            'simplified': 'true',
+        }.items()
     )
     
     
