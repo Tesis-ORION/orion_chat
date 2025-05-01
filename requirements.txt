@@ -3,8 +3,8 @@ openai-whisper
 SpeechRecognition
 pygame
 gTTS
+jpl-rosa
 PyAudio
-jpl-rosa 
 text2num
 Flask
 flask-cors
