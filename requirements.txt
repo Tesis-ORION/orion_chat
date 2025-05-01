@@ -2,7 +2,7 @@ requests
 openai-whisper
 SpeechRecognition
 pygame
-gTTS
+edge-tts
 jpl-rosa
 PyAudio
 text2num

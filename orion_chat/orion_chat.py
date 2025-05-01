@@ -247,7 +247,7 @@ class OrionChatMovementNode(Node):
             f"El usuario indicó: '{user_message}'."
         )
         payload = {
-            "model": "llama3.1",
+            "model": "gemma3",
             "messages": [
                 {"role": "system", "content": "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."},
                 {"role": "user", "content": confirmation_prompt}
@@ -292,7 +292,7 @@ class OrionChatMovementNode(Node):
             {"role": "user", "content": augmented_prompt}
         ]
         payload = {
-            "model": "llama3.1",
+            "model": "gemma3",
             "messages": messages,
             "stream": True
         }

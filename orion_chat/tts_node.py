@@ -1,101 +1,122 @@
-import threading
-import queue
-import concurrent.futures
+#!/usr/bin/env python3
 import io
-from gtts import gTTS
-import pygame
 import re
+import os
+import subprocess
+import tempfile
+import multiprocessing as mp
+import pygame
+
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-# Colas para el procesamiento TTS
-text_queue = queue.Queue()    # Textos pendientes de conversión
-audio_queue = queue.Queue()   # Audios (bytes) convertidos
+VOICE = "es-VE-SebastianNeural"
 
-def tts_conversion_worker(text):
-    
-    # Convierte el texto a audio usando gTTS y retorna los datos de audio (bytes).
-    
-    try:
-        print("[TTS Conversion] Procesando texto:", text)
-        tts = gTTS(text=text, lang="es", slow=False)
-        audio_stream = io.BytesIO()
-        tts.write_to_fp(audio_stream)
-        audio_stream.seek(0)
-        return audio_stream.read()
-    except Exception as e:
-        print("Error en conversión TTS:", e)
-        return None
-
-def text_handler_worker():
-    
-    # Extrae textos de la cola, los procesa a audio de forma concurrente y coloca el audio resultante en la cola.
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        while True:
-            text = text_queue.get()
-            if text is None:
-                break
-            future = executor.submit(tts_conversion_worker, text)
-            audio_data = future.result()
-            if audio_data:
-                audio_queue.put(audio_data)
-            text_queue.task_done()
-
-def audio_playback_worker():
-    
-    # Extrae audios convertidos de la cola y los reproduce secuencialmente.
-    
-    pygame.mixer.init()
+def tts_worker(text_queue: mp.Queue, audio_queue: mp.Queue):
+    """Proceso que convierte texto a audio MP3 usando edge-tts y lo pone en audio_queue."""
     while True:
-        audio_data = audio_queue.get()
-        if audio_data is None:
+        text = text_queue.get()
+        if text is None:
+            break
+
+        # Crea un archivo temporal para el MP3
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            # Llama al CLI de edge-tts
+            subprocess.run([
+                "edge-tts",
+                "--voice", VOICE,
+                "--text", text,
+                "--write-media", tmp_path
+            ], check=True)
+
+            # Lee el MP3 en memoria
+            with open(tmp_path, "rb") as f:
+                audio_queue.put(f.read())
+
+        except subprocess.CalledProcessError as e:
+            # Si falla la síntesis, puedes loguearlo aquí
+            continue
+
+        finally:
+            # Limpia el archivo
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+def playback_worker(audio_queue: mp.Queue):
+    """Proceso que reproduce los audios encolados."""
+    pygame.mixer.pre_init(44100, -16, 2, 1024)
+    pygame.init()
+    while True:
+        data = audio_queue.get()
+        if data is None:
             break
         try:
-            audio_stream = io.BytesIO(audio_data)
-            pygame.mixer.music.load(audio_stream, "mp3")
+            pygame.event.pump()
+            pygame.mixer.music.load(io.BytesIO(data), "mp3")
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(10)
-        except Exception as e:
-            print("Error en reproducción de audio:", e)
-        audio_queue.task_done()
+                pygame.event.pump()
+                pygame.time.wait(10)
+        except Exception:
+            continue
 
 class OrionTTSNode(Node):
     def __init__(self):
         super().__init__("orion_tts")
         self.subscription = self.create_subscription(
-            String,
-            "orion_response",
-            self.listener_callback,
-            10
+            String, "orion_response", self.listener_callback, 10
         )
-        self.get_logger().info("Nodo TTS iniciado, esperando mensajes en 'orion_response'.")
+        self.get_logger().info("Nodo TTS optimizado iniciado.")
 
-    def clean_orion_prefix(self, text):
-        return re.sub(r'(\[ORION:\s*\]|\[ORION\]:)', '', text).strip()
+        self.text_queue = mp.Queue()
+        self.audio_queue = mp.Queue()
 
-    def listener_callback(self, msg):
-        text = self.clean_orion_prefix(msg.data)
-        self.get_logger().info(f"Encolando TTS: {text}")
-        text_queue.put(text)
+        # Arranca dos procesos para producción
+        self.tts_procs = []
+        for _ in range(2):
+            p = mp.Process(
+                target=tts_worker,
+                args=(self.text_queue, self.audio_queue),
+                daemon=True
+            )
+            p.start()
+            self.tts_procs.append(p)
 
-def main():
-    rclpy.init()
+        # Proceso de reproducción
+        self.playback_proc = mp.Process(
+            target=playback_worker,
+            args=(self.audio_queue,),
+            daemon=True
+        )
+        self.playback_proc.start()
+
+    def listener_callback(self, msg: String):
+        # Limpia prefijo [ORION] y encola
+        text = re.sub(r"^\[?ORION[:\]\s]+", "", msg.data).strip()
+        self.get_logger().info(f"Encolando para TTS: {text}")
+        self.text_queue.put(text)
+
+    def destroy_node(self):
+        for _ in self.tts_procs:
+            self.text_queue.put(None)
+        self.audio_queue.put(None)
+        super().destroy_node()
+
+def main(args=None):
+    rclpy.init(args=args)
     node = OrionTTSNode()
-
-    playback_thread = threading.Thread(target=audio_playback_worker, daemon=True)
-    playback_thread.start()
-
-    conversion_thread = threading.Thread(target=text_handler_worker, daemon=True)
-    conversion_thread.start()
-
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
-
-
