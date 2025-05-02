@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import re
 import time
 import threading
 from collections import deque
@@ -239,36 +240,79 @@ class OrionChatMovementNode(Node):
 
     def send_natural_confirmation(self, user_message):
         """
-        Solicita al LLM que responda en lenguaje natural confirmando la acción a partir del mensaje original.
-        La respuesta se publica en el tópico de salida.
+        Solicita al LLM una confirmación en lenguaje natural en streaming,
+        publicando cada frase según llegue.
         """
+        # Prepara modo streaming
+        self.streaming_mode = True
+        self.first_stream_message_sent = False
+
+        # Construye el prompt de confirmación
         confirmation_prompt = (
-            "Responde de forma natural confirmando la acción de movimiento, sin incluir datos técnicos. "
+            "Responde de forma natural confirmando la acción de movimiento, "
+            "sin incluir datos técnicos. "
             f"El usuario indicó: '{user_message}'."
         )
+        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."
+
         payload = {
             "model": "gemma3",
             "messages": [
-                {"role": "system", "content": "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."},
-                {"role": "user", "content": confirmation_prompt}
+                {"role": "system",   "content": system_prompt},
+                {"role": "user",     "content": confirmation_prompt}
             ],
-            "stream": False
+            "stream": True
         }
+
         url = "http://localhost:11434/api/chat"
         try:
-            response = requests.post(url, json=payload)
+            # peticion en streaming
+            response = requests.post(url, json=payload, stream=True)
             response.raise_for_status()
-            data = response.json()
-            content = ""
-            if "message" in data and isinstance(data["message"], dict):
-                content = data["message"].get("content", "")
-            elif "response" in data:
-                content = data["response"]
-            content = content.strip()
         except Exception as e:
-            content = f"Error al obtener confirmación: {e}"
-        # Publicar solo la respuesta natural (para TTS)
-        self.publish_response(content)
+            self.get_logger().error(f"Error al comunicarse para confirmación: {e}")
+            # Publica un único mensaje de error
+            self.publish_response(f"[ORION]: Error al obtener confirmación: {e}")
+            self.streaming_mode = False
+            return
+
+        buffer = ""
+
+
+        # Procesa cada línea de la respuesta stream
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            token_received = True
+            try:
+                data = json.loads(line)
+                # Extrae el token o el content dentro de message
+                token = data.get("token")
+                if token is None:
+                    msg_obj = data.get("message")
+                    token = msg_obj.get("content", "") if isinstance(msg_obj, dict) else ""
+                buffer += token
+
+                # Cuando llegamos a un signo de puntuación, publicamos la frase completa
+                if buffer and (
+                    buffer[-1] in {',', '!', '?'}
+                    or re.search(r'(?<!\d)\.(?!\d)$', buffer)
+                ):
+                    phrase = buffer.strip()
+                    self.publish_response(phrase)
+                    # Opcional: llevar historial de confirmaciones
+                    self.chat_history.append(f"[ORION]: {phrase}")
+                    buffer = ""
+            except Exception as e:
+                self.get_logger().error(f"Error procesando token de confirmación: {e}")
+
+        # Si quedó algo en el buffer, publicarlo también
+        if buffer:
+            self.publish_response(buffer.strip())
+            self.chat_history.append(f"[ORION]: {buffer.strip()}")
+
+        # Fin del streaming
+        self.streaming_mode = False
 
     def generate_augmented_prompt(self, user_message):
         history_text = "\n".join(list(self.chat_history))
@@ -304,7 +348,6 @@ class OrionChatMovementNode(Node):
             self.get_logger().error(f"Error al comunicarse con Ollama: {e}")
             return
         buffer = ""
-        punctuation_marks = {'.', ',', '!', '?'}
         self.get_logger().info("Respuesta del LLM (streaming):")
         token_found = False
         for line in response.iter_lines(decode_unicode=True):
@@ -319,10 +362,13 @@ class OrionChatMovementNode(Node):
                             token = message.get("content", "")
                     print(token, end='', flush=True)
                     buffer += token
-                    if token and token[-1] in punctuation_marks:
+                    if buffer and (
+                        buffer[-1] in {',', '!', '?'}
+                        or re.search(r'(?<!\d)\.(?!\d)$', buffer)
+                    ):
                         phrase = buffer.strip()
                         self.publish_response(phrase)
-                        self.chat_history.append(f"ORION: {phrase}")
+                        self.chat_history.append(f"[ORION]: {phrase}")
                         buffer = ""
                 except Exception as e:
                     self.get_logger().error(f"Error procesando stream: {e}")
@@ -331,23 +377,25 @@ class OrionChatMovementNode(Node):
         if buffer:
             phrase = buffer.strip()
             self.publish_response(phrase)
-            self.chat_history.append(f"ORION: {phrase}")
+            self.chat_history.append(f"[ORION]: {phrase}")
         self.streaming_mode = False  # Finalizamos el modo streaming al terminar
 
 
     def publish_response(self, text: str):
         """Publica la respuesta (solo lenguaje natural) en el tópico de salida (TTS)."""
+        """ Quitar un posible prefijo "[ORION]:" que ya venga en el texto """
+        clean_text = re.sub(r'^\s*\[ORION\]\s*:\s*', '', text)
         msg = String()
         if getattr(self, 'streaming_mode', False):
             # Si estamos en streaming, solo al primer mensaje se le agrega el prefijo
             if not getattr(self, 'first_stream_message_sent', False):
-                msg.data = f"[ORION]: {text}"
+                msg.data = f"[ORION]: {clean_text}"
                 self.first_stream_message_sent = True
             else:
-                msg.data = text
+                msg.data = clean_text
         else:
             # Para respuestas que no son streaming, se agrega el prefijo siempre.
-            msg.data = f"[ORION]: {text}"
+            msg.data = f"[ORION]: {clean_text}"
         self.response_pub.publish(msg)
         self.get_logger().info(f"Respuesta publicada: {msg.data}")
 

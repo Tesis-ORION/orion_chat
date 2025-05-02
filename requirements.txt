@@ -9,4 +9,6 @@ text2num
 Flask
 flask-cors
 sounddevice
+realtimetts[all]
+
 
