@@ -43,10 +43,12 @@ class OrionTTS(Node):
         # Voz para edge-tts (voz en español, se puede cambiar según preferencia)
         self.tts_voice = "es-VE-SebastianNeural"
         self._pa = pyaudio.PyAudio()
+        # sample rate para PyAudio y FFmpeg
+        self._audio_rate = 48000
         self._audio_stream = self._pa.open(
             format=pyaudio.paInt16,
             channels=1,
-            rate=48000,             
+            rate=self._audio_rate,
             output=True
         )
         # Iniciar hilos de trabajo para TTS (2 procesos paralelos)
@@ -90,19 +92,34 @@ class OrionTTS(Node):
             with self.audio_lock:
                 # Marcar estado "hablando"
                 self.speaking = True
-                 # Iniciar reproducción de audio con mpg123 (silencioso)
-                proc = subprocess.Popen(["mpg123", "-q", output_file])
+                # Decodificar MP3 a PCM y reproducir por PyAudio
+                ff = subprocess.Popen([
+                        "ffmpeg", "-i", output_file,
+                        "-f", "s16le",
+                        "-ar", str(self._audio_rate),
+                        "-ac", "1",
+                        "pipe:1"
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL
+                )
 
                 # Arrancar hilo de gestos si está habilitado
                 if self.gestures_enabled:
                     threading.Thread(
                         target=self._gestures_during_speech,
-                        args=(proc, text),
+                        args=(ff, text),
                         daemon=True
                     ).start()
 
-                # Esperar únicamente a que termine el audio
-                proc.wait()
+                # Leer chunks y enviar al stream de PyAudio
+                while True:
+                    chunk = ff.stdout.read(1024)
+                    if not chunk:
+                        break
+                    self._audio_stream.write(chunk)
+
+                ff.wait()
                 # Marcar fin de locución
                 self.speaking = False
             # (Audio lock liberado aquí, permite al siguiente audio reproducirse)
