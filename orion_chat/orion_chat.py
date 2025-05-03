@@ -14,6 +14,8 @@ from geometry_msgs.msg import Twist
 import requests
 from text_to_num import text2num
 import difflib
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 
 def remove_accents(input_str):
     """Elimina acentos y caracteres diacríticos de la cadena."""
@@ -136,8 +138,22 @@ class MovementLayer:
 class OrionChatMovementNode(Node):
     def __init__(self):
         super().__init__("orion_chat_movement")
-        self.subscription = self.create_subscription(String, "orion_input", self.listener_callback, 10)
-        self.response_pub = self.create_publisher(String, "orion_response", 10)
+        self.qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        self.subscription = self.create_subscription(
+            String,
+            'orion_input',
+            self.listener_callback,
+            qos_profile=self.qos
+        )
+        self.response_pub = self.create_publisher(
+            String,
+            'orion_response',
+            qos_profile=self.qos
+        )
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.chat_history = deque(maxlen=10)
         self.last_message = None

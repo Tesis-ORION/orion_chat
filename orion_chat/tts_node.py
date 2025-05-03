@@ -11,17 +11,28 @@ import subprocess
 import re
 import edge_tts
 import pyaudio
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 
 class OrionTTS(Node):
     def __init__(self):
         super().__init__('orion_tts')
+        self.qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
         # Publishers para brazos y base
         self.pub_left_arm = self.create_publisher(Float64, '/servo_conn1_joint/cmd_pos', 10)
         self.pub_right_arm = self.create_publisher(Float64, '/servo_conn2_joint/cmd_pos', 10)
         self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', 10)
         # Subscriber para las respuestas de texto
-        self.create_subscription(String, 'orion_response', self.on_response, 10)
-        # Flags de estado interno
+        self.create_subscription(
+            String,
+            'orion_response',
+            self.on_response,
+            qos_profile=self.qos
+        )        # Flags de estado interno
         self.gestures_enabled = True            # gestos habilitados durante el habla
         self.autonomous_life_enabled = True     # movimientos de vida autónoma habilitados
         self.speaking = False                  # True mientras se está reproduciendo audio
