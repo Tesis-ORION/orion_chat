@@ -3,12 +3,10 @@ openai-whisper
 SpeechRecognition
 pygame
 edge-tts
-jpl-rosa
 PyAudio
 text2num
 Flask
 flask-cors
 sounddevice
-realtimetts[all]
 
 

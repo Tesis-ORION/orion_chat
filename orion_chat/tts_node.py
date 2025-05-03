@@ -46,7 +46,7 @@ class OrionTTS(Node):
         self._audio_stream = self._pa.open(
             format=pyaudio.paInt16,
             channels=1,
-            rate=24000,             
+            rate=48000,             
             output=True
         )
         # Iniciar hilos de trabajo para TTS (2 procesos paralelos)
