@@ -311,7 +311,7 @@ class OrionChatMovementNode(Node):
 
                 # Cuando llegamos a un signo de puntuación, publicamos la frase completa
                 if buffer and (
-                    buffer[-1] in {',', '!', '?'}
+                    buffer[-1] in { '!', '?'}
                     or re.search(r'(?<!\d)\.(?!\d)$', buffer)
                 ):
                     phrase = buffer.strip()
@@ -379,7 +379,7 @@ class OrionChatMovementNode(Node):
                     print(token, end='', flush=True)
                     buffer += token
                     if buffer and (
-                        buffer[-1] in {',', '!', '?'}
+                        buffer[-1] in { '!', '?'}
                         or re.search(r'(?<!\d)\.(?!\d)$', buffer)
                     ):
                         phrase = buffer.strip()
