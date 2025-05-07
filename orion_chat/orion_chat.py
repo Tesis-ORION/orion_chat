@@ -161,16 +161,38 @@ class OrionChatMovementNode(Node):
         self.current_mode = "conversation"  # Modo por defecto
 
         # Cargar archivos de configuración (RAG) desde la carpeta resource
-        self.conversation_config = self.load_resource("conversation_config.json")
         self.movement_config = self.load_resource("movement_config.json")
+        self.conversation_config = self.load_resource("conversation_config.json")
+        # 1) Inicializar manejo de emoción
+        self.current_emotion = 'neutral'
+        self.emotion_subscriber = self.create_subscription(
+            String,
+            self.conversation_config.get("emotion_topic", "/emotion"),
+            self.emotion_callback,
+            qos_profile=self.qos
+        )
+         # 2) Construir system_prompt completo
+        desc       = self.conversation_config["description"]
+        ctx        = self.conversation_config["context"]
+        instr      = "\n".join(self.conversation_config["instructions"])
+        ext_doc    = self.conversation_config.get("external_document", "")
+        self.system_prompt = (
+            f"{desc}\n"
+            f"Contexto: {ctx}\n"
+            f"{ext_doc}\n"
+            f"Instrucciones:\n{instr}\n"
+        )
+    def emotion_callback(self, msg: String):
+        """Actualiza self.current_emotion con el valor recibido en /emotion."""
+        self.current_emotion = msg.data
+        self.get_logger().info(f"Emoción actualizada a: {self.current_emotion}")
+ 
 
         self.movement_layer = MovementLayer(self.movement_config, self.cmd_vel_pub, self.get_logger())
 
         # Frases clave para cambiar de modo
         self.activate_movement_phrases = ["preparate.", "preparate", "Preparate", "Preparate.", "Prepárate."]
         self.activate_conversation_phrases = ["Hablemos.", "Quiero hablar."]
-
-        self.get_logger().info("Nodo iniciado en modo conversación.")
 
     def load_resource(self, filename):
         """Carga un archivo JSON desde la carpeta resource del paquete."""
@@ -332,21 +354,24 @@ class OrionChatMovementNode(Node):
 
     def generate_augmented_prompt(self, user_message):
         history_text = "\n".join(list(self.chat_history))
-        system_prompt = self.conversation_config.get("system_prompt", "")
+# Usar el prompt construido a partir de las instrucciones
+        system_prompt = self.system_prompt        
         external_document = self.conversation_config.get("external_document", "")
         prompt = (
-            f"{system_prompt}\n\n"
+            f"{system_prompt}\n"
+            f"El usuario está sintiendo **{self.current_emotion}**.\n\n"
             f"Contexto reciente:\n{history_text}\n\n"
             f"Documentos adicionales:\n{external_document}\n\n"
             f"Pregunta del usuario: {user_message}\n\n"
-            f"Responde de forma natural y conversacional."
+            f"Responde de forma natural y breve, y formatea la salida como \"[{self.current_emotion}]: respuesta\"."
         )
         return prompt
 
     def process_stream(self, augmented_prompt):
         self.streaming_mode = True
         self.first_stream_message_sent = False  # Reiniciamos para la nueva respuesta en streaming
-        system_prompt = self.conversation_config.get("system_prompt", "")
+        # Usar el system_prompt completo construido en __init__
+        system_prompt = self.system_prompt
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": augmented_prompt}
