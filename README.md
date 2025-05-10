@@ -1,6 +1,6 @@
 # Orion Chat 🤖💬
 
-![ROS 2](https://img.shields.io/badge/ROS2-Jazzy-blue) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-orange) ![Python](https://img.shields.io/badge/Python-3.12-yellow)
+![ROS 2](https://img.shields.io/badge/ROS2-Jazzy-blue) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-orange) ![Python](https://img.shields.io/badge/Python-3.12-yellow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Tesis-ORION/orion_chat)
 
 ## 🚀 Overview
 **Orion Chat** is a ROS 2 Jazzy package that orchestrates speech‑to‑text (STT), chat engine, and text‑to‑speech (TTS) nodes using a single launch file. It runs on Ubuntu 24.04 with support for Ignition Harmonic simulation, integrating Whisper for STT, OLLAMA for language processing, and edge-TTS for TTS, enabling seamless human–robot interaction.
@@ -101,6 +101,7 @@ ros2 launch orion_chat orion_gz_launch.py
 2. Create a branch (`feature/...`)  
 3. Commit your changes and add tests  
 4. Open a Pull Request against `main`
+
 
 ## 📜 License
 **MIT License** – Permissive and ensures attribution. See [LICENSE](LICENSE).
