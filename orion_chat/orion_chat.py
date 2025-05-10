@@ -171,6 +171,9 @@ class OrionChatMovementNode(Node):
             self.emotion_callback,
             qos_profile=self.qos
         )
+        # Frases clave para cambiar de modo
+        self.activate_movement_phrases = ["preparate.", "preparate", "Preparate", "Preparate.", "Prepárate."]
+        self.activate_conversation_phrases = ["Hablemos.", "Quiero hablar."]
          # 2) Construir system_prompt completo
         desc       = self.conversation_config["description"]
         ctx        = self.conversation_config["context"]
@@ -190,9 +193,7 @@ class OrionChatMovementNode(Node):
 
         self.movement_layer = MovementLayer(self.movement_config, self.cmd_vel_pub, self.get_logger())
 
-        # Frases clave para cambiar de modo
-        self.activate_movement_phrases = ["preparate.", "preparate", "Preparate", "Preparate.", "Prepárate."]
-        self.activate_conversation_phrases = ["Hablemos.", "Quiero hablar."]
+        
 
     def load_resource(self, filename):
         """Carga un archivo JSON desde la carpeta resource del paquete."""
