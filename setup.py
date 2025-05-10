@@ -35,6 +35,7 @@ setup(
             'orion_tts = orion_chat.tts_node:main',  # Nodo de Text-to-Speech
             'orion_stt = orion_chat.stt_node:main',  # Nodo de Speech-to-Text
             'audio_recorder = orion_chat.audio_recorder:main',  # Nodo del grabador de audio
+            'audio_player = orion_chat.audio_player:main',  # Nodo del reproductor de audio
         ],
     },
 )

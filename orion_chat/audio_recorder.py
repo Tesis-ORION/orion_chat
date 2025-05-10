@@ -1,116 +1,111 @@
 #!/usr/bin/env python3
-import sys
-import tempfile
-import threading
-import queue
-import wave
-import os
-import requests
+import uuid
+import sounddevice as sd
+import numpy as np
+from loguru import logger
 import rclpy
 from rclpy.node import Node
+from audio_messages.msg import AudioInfo, AudioData
+from std_msgs.msg import Bool
+from datetime import datetime
 
-# Configuración
-FLASK_URL = "http://localhost:5000/upload"
-SAMPLE_RATE = 16000       # Frecuencia de muestreo en Hz
-CHANNELS = 1              # Mono
-
-class AudioRecorderNode(Node):
+class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.get_logger().info("AudioRecorderNode inicializado.")
+        # Publishers
+        self.pub_web  = self.create_publisher(Bool,      'web',        10)
+        self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
+        self.pub_data = self.create_publisher(AudioData, 'audio_data', 10)
 
-    def run(self):
-        # Bucle principal: graba y envía continuamente
-        while rclpy.ok():
-            # 1) Espera ENTER para comenzar
-            self.get_logger().info("Presiona ENTER para comenzar a grabar...")
-            try:
-                input()
-            except EOFError:
-                break
+        # Parámetros de audio
+        self.CHANNELS    = 1
+        self.SAMPLE_RATE = 44100
 
-            # 2) Preparar grabación
-            record_queue = queue.Queue()
-            stop_event = threading.Event()
+        # — Aquí ajustas la tolerancia: —
+        self.silence_threshold    = 0.02   # umbral para considerar silencio
+        self.silence_max_duration = 1.0    # s de silencio antes de publicar
+        # — fin de parámetros —
 
-            def callback(indata, frames, time, status):
-                if status:
-                    print(f"[!] {status}", file=sys.stderr)
-                record_queue.put(indata.copy())
+        # Tamaño de cada bloque
+        self.chunk_duration = 0.1
+        self.chunk_size     = int(self.SAMPLE_RATE * self.chunk_duration)
 
-            # 3) Iniciar grabación en hilo
-            recorder = threading.Thread(
-                target=self._record_audio,
-                args=(record_queue, stop_event, callback),
-                daemon=True
-            )
-            recorder.start()
+        # Estado interno
+        self.speech_buffer  = []
+        self.silence_chunks = 0
+        self.is_speaking    = False
 
-            # 4) Detener con ENTER
-            self.get_logger().info("Grabando... presiona ENTER nuevamente para detener.")
-            input()
-            stop_event.set()
-            recorder.join()
-            self.get_logger().info("Grabación finalizada.")
+        self.device = sd.default.device[0]
+        logger.info(f"Dispositivo de audio: {self.device}")
 
-            # 5) Recolectar frames
-            frames = []
-            while not record_queue.empty():
-                frames.append(record_queue.get())
+    def sound_cb(self, indata, frames, time, status):
+        if status:
+            logger.warning(status)
 
-            # 6) Guardar WAV temporal
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                wav_path = tmp.name
-            with wave.open(wav_path, 'wb') as wf:
-                wf.setnchannels(CHANNELS)
-                wf.setsampwidth(2)  # 16 bits = 2 bytes
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(b''.join(frames))
-            self.get_logger().info(f"Audio guardado en {wav_path}")
+        level = np.max(np.abs(indata))
+        if level > self.silence_threshold:
+            # voz activa
+            self.speech_buffer.append(indata.copy())
+            self.silence_chunks = 0
+            self.is_speaking    = True
+        else:
+            # silencio
+            if self.is_speaking:
+                self.silence_chunks += 1
+                if self.silence_chunks * self.chunk_duration >= self.silence_max_duration:
+                    self._end_of_utterance()
 
-            # 7) Enviar al servidor Flask en segundo plano (silencioso)
-            threading.Thread(target=self._send_audio, args=(wav_path,), daemon=True).start()
+    def _end_of_utterance(self):
+        # concatenar y resetear
+        data = np.concatenate(self.speech_buffer, axis=0)
+        self.speech_buffer.clear()
+        self.is_speaking    = False
+        self.silence_chunks = 0
 
-            # 8) Esperar ENTER para iniciar siguiente grabación
-            self.get_logger().info("Presiona ENTER para iniciar la siguiente grabación.")
-            try:
-                input()
-            except EOFError:
-                break
+        # 1) Publicar false en /web
+        web_msg = Bool(data=False)
+        self.pub_web.publish(web_msg)
 
-        self.get_logger().info("AudioRecorderNode finalizado.")
+        # 2) Publicar AudioInfo
+        uid = str(uuid.uuid4())
+        info = AudioInfo(
+            num_channels=self.CHANNELS,
+            sample_rate=self.SAMPLE_RATE,
+            subtype='float32',
+            uuid=uid
+        )
+        self.pub_info.publish(info)
 
-    def _send_audio(self, wav_path):
-        try:
-            with open(wav_path, 'rb') as f:
-                files = {'file': (os.path.basename(wav_path), f, 'audio/wav')}
-                resp = requests.post(FLASK_URL, files=files)
-                resp.raise_for_status()
-            # Eliminar archivo temporal tras envío exitoso
-            os.remove(wav_path)
-        except Exception as e:
-            self.get_logger().error(f"Error al enviar audio o eliminar archivo: {e}")
+        # 3) Publicar AudioData
+        msg = AudioData()
+        msg.data = data.astype(np.float32)
+        self.pub_data.publish(msg)
 
-    def _record_audio(self, record_queue, stop_event, callback):
-        import sounddevice as sd
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype='int16',
-            callback=callback
-        ):
-            while not stop_event.is_set():
-                sd.sleep(100)
-
+        self.get_logger().info(
+            f"► Publicado utterance uuid={uid}, muestras={data.shape[0]}"
+        )
 
 def main(args=None):
     rclpy.init(args=args)
-    node = AudioRecorderNode()
+    node = AudioRecorder()
+
+    stream = sd.InputStream(
+        device=node.device,
+        channels=node.CHANNELS,
+        samplerate=node.SAMPLE_RATE,
+        blocksize=node.chunk_size,
+        callback=node.sound_cb
+    )
+    stream.start()
+    node.get_logger().info("Recorder activo: detectando silencio y publicando false…")
+
     try:
-        node.run()
+        rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Interrupción manual, terminando.")
+        pass
     finally:
+        stream.stop()
+        stream.close()
         node.destroy_node()
         rclpy.shutdown()
 

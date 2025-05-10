@@ -1,12 +1,10 @@
 requests
 openai-whisper
-SpeechRecognition
 pygame
 edge-tts
 PyAudio
 text2num
-Flask
-flask-cors
 sounddevice
-
+numpy
+loguru
 

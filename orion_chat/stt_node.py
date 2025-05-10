@@ -1,92 +1,135 @@
+#!/usr/bin/env python3
 import os
-import sys
-import json
-import time
-import threading
 import tempfile
+import uuid
+
+import numpy as np
 import rclpy
-from rclpy.node import Node
-from std_msgs.msg import String
-from flask import Flask, request, jsonify
 import whisper
-from flask_cors import CORS  # Importa Flask-CORS
+import difflib
+import soundfile as sf
+import librosa
+
+from rclpy.node import Node
+from std_msgs.msg import Bool, String
+from audio_messages.msg import AudioInfo, AudioData
+
 
 class OrionSTTNode(Node):
     def __init__(self):
         super().__init__('orion_stt')
-        self.publisher_ = self.create_publisher(String, 'orion_input', 10)
-        
-        # Cargar el modelo Whisper de OpenAI
-        self.get_logger().info("Cargando modelo Whisper en modo CPU...")
+
+        # Publicador final de texto
+        self.pub_text = self.create_publisher(String, 'orion_input', 10)
+
+        # Suscriptor al flag web
+        self.web_flag = False
+        self.create_subscription(Bool, 'web', self.web_cb, 10)
+
+        # Cargar modelo Whisper “medium” en CPU
+        self.get_logger().info("Cargando modelo Whisper small en modo CPU...")
         self.whisper_model = whisper.load_model("small", device="cpu")
-        self.get_logger().info("Modelo Whisper cargado correctamente en modo CPU.")
+        self.get_logger().info("Modelo Whisper cargado correctamente.")
 
-        # Configurar la aplicación Flask
-        self.app = Flask(__name__)
-        CORS(self.app)  # Habilita CORS para todas las rutas
+        # Subscriptores de audio
+        self._pending_info = None
+        self._pending_frames = []
+        self.create_subscription(AudioInfo, 'audio_info', self.info_cb, 10)
+        self.create_subscription(AudioData, 'audio_data', self.data_cb, 10)
 
-        self.setup_routes()
+    def web_cb(self, msg: Bool):
+        self.web_flag = msg.data
 
-        # Ejecutar Flask en un hilo separado
-        self.flask_thread = threading.Thread(target=self.run_flask, daemon=True)
-        self.flask_thread.start()
-        self.get_logger().info("Servidor Flask iniciado en hilo separado.")
+    def info_cb(self, msg: AudioInfo):
+        # Guardar metadatos
+        self._pending_info = msg
 
-    def setup_routes(self):
-        @self.app.route('/upload', methods=['POST'])
-        def upload_audio():
-            if 'file' not in request.files:
-                return jsonify({"error": "No se encontró el archivo en la solicitud"}), 400
-            file = request.files['file']
-            if file.filename == '':
-                return jsonify({"error": "No se seleccionó ningún archivo"}), 400
-            
-            # Guardar el archivo de audio de forma temporal
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                file.save(tmp)
-                tmp_path = tmp.name
+    def data_cb(self, msg: AudioData):
+        # Acumular fragmentos raw a 44.1 kHz float32
+        self._pending_frames.append(np.array(msg.data, dtype=np.float32))
 
-            self.get_logger().info(f"Archivo recibido: {tmp_path}")
+        # Solo procesar cuando tengamos metadatos
+        if not self._pending_info:
+            return
 
-            try:
-                # Transcribir el audio usando Whisper
-                result = self.whisper_model.transcribe(tmp_path)
-                transcript = result.get("text", "").strip()
-                self.get_logger().info(f"Transcripción: {transcript}")
+        # Construir y guardar WAV temporal resampleado
+        wav_path = self._build_temp_wav(self._pending_info, self._pending_frames)
 
-                # Publicar el comando transcrito en el tópico ROS
-                if transcript:
-                    msg = String()
-                    msg.data = transcript
-                    self.publisher_.publish(msg)
-                    self.get_logger().info("Mensaje publicado en 'orion_input'.")
+        try:
+            # Transcribir forzando español
+            result = self.whisper_model.transcribe(
+                wav_path,
+                language='es'
+            )
+            transcript = result.get("text", "").strip()
+            self.get_logger().info(f"Transcripción: {transcript!r}")
+
+            # Decidir envío
+            send_ok = False
+            if self.web_flag:
+                send_ok = True
+            else:
+                txt_low = transcript.lower()
+                if 'orion' in txt_low:
+                    send_ok = True
                 else:
-                    self.get_logger().info("No se obtuvo transcripción del audio.")
+                    for word in txt_low.split():
+                        if difflib.SequenceMatcher(None, word, 'orion').ratio() >= 0.8:
+                            send_ok = True
+                            break
 
-                # Eliminar el archivo temporal
-                os.remove(tmp_path)
-                return jsonify({"transcript": transcript}), 200
-            except Exception as e:
-                self.get_logger().error(f"Error al procesar el audio: {e}")
-                return jsonify({"error": str(e)}), 500
+            if send_ok and transcript:
+                msg_out = String(data=transcript)
+                self.pub_text.publish(msg_out)
+                self.get_logger().info(f"Publicado en 'orion_input': {transcript!r}")
 
-    def run_flask(self):
-        # Ejecutar la aplicación Flask en el puerto 5000
-        self.app.run(host='0.0.0.0', port=5000)
+        except Exception as e:
+            self.get_logger().error(f"Error en Whisper: {e}")
 
-    def run(self):
-        rclpy.spin(self)
+        finally:
+            # Limpiar
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+            self._pending_info = None
+            self._pending_frames.clear()
+
+    def _build_temp_wav(self, info: AudioInfo, frames_list):
+        """
+        Concatena float32@44.1k → resample a 16k → salva float32 WAV.
+        Devuelve ruta del WAV.
+        """
+        # 1) Concat raw
+        raw = np.concatenate(frames_list, axis=0)
+
+        # 2) Resample a 16 kHz
+        audio_16k = librosa.resample(raw,
+                                     orig_sr=info.sample_rate,
+                                     target_sr=16000)
+
+        # 3) Guardar WAV float32
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+        tmp_path = tmp.name
+        tmp.close()
+
+        sf.write(tmp_path,
+                 audio_16k,
+                 16000,
+                 subtype='FLOAT')
+        self.get_logger().debug(f"WAV temporal resampleado escrito en {tmp_path}")
+        return tmp_path
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = OrionSTTNode()
     try:
-        node.run()
+        rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Terminando nodo por interrupción manual.")
+        node.get_logger().info("Interrupción manual, cerrando nodo.")
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
