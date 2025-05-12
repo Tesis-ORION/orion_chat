@@ -82,7 +82,7 @@ class AudioRecorder(Node):
         self.pub_data.publish(msg)
 
         self.get_logger().info(
-            f"► Publicado utterance uuid={uid}, muestras={data.shape[0]}"
+            f"Publicado utterance uuid={uid}, muestras={data.shape[0]}"
         )
 
 def main(args=None):
