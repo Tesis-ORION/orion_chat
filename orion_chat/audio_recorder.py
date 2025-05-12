@@ -76,7 +76,7 @@ class AudioRecorder(Node):
                         if speech_count > self.min_speech_frames:
                             # Utterance START
                             uid = str(uuid.uuid4())
-                            self.pub_web.publish(Bool(data=True))
+                            self.pub_web.publish(Bool(data=False))
                             info = AudioInfo(
                                 num_channels=self.channels,
                                 sample_rate=self.sample_rate,
@@ -104,7 +104,6 @@ class AudioRecorder(Node):
                             msg = AudioData()
                             msg.data = pcm.flatten().tolist()
                             self.pub_data.publish(msg)
-                            self.pub_web.publish(Bool(data=False))
                             self.get_logger().info(
                                 f"Utterance END uuid={uid}, frames={len(speech_frames)}"
                             )
