@@ -7,4 +7,4 @@ text2num
 sounddevice
 numpy
 loguru
-
+webrtcvad
