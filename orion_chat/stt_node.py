@@ -74,7 +74,7 @@ class OrionSTTNode(Node):
                     send_ok = True
                 else:
                     for word in txt_low.split():
-                        if difflib.SequenceMatcher(None, word, 'orion').ratio() >= 0.8:
+                        if difflib.SequenceMatcher(None, word, 'orion').ratio() >= 0.6:
                             send_ok = True
                             break
 
