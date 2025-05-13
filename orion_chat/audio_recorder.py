@@ -14,6 +14,7 @@ from audio_messages.msg import AudioInfo, AudioData
 class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
+        self.energy_threshold = 0.02
         # Publishers
         self.pub_web  = self.create_publisher(Bool,      'web',        10)
         self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
@@ -64,8 +65,10 @@ class AudioRecorder(Node):
 
             while rclpy.ok():
                 frame = q.get()  # Bloque de 16-bit PCM
-                is_speech = self.vad.is_speech(frame, self.sample_rate)
-
+                pcm = np.frombuffer(frame, dtype=np.int16)
+                energy_level = np.max(np.abs(pcm)) / 32768.0
+                vad_flag  = self.vad.is_speech(frame, self.sample_rate)
+                is_speech = vad_flag and (energy_level > self.energy_threshold)
                 if not in_speech:
                     # Buscamos el inicio de la frase
                     ring_buffer.append(frame)
