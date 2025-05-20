@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import re
 import time
 import threading
 from collections import deque
@@ -13,11 +14,14 @@ from geometry_msgs.msg import Twist
 import requests
 from text_to_num import text2num
 import difflib
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 
 def remove_accents(input_str):
     """Elimina acentos y caracteres diacríticos de la cadena."""
     nfkd_form = unicodedata.normalize('NFD', input_str)
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
 
 def convert_number(text):
     """Convierte el texto a un número (soporta dígitos o palabras en español)."""
@@ -29,6 +33,7 @@ def convert_number(text):
         except Exception:
             return None
 
+
 class MovementLayer:
     def __init__(self, config, cmd_vel_publisher, node_logger):
         self.cmd_vel_pub = cmd_vel_publisher
@@ -37,11 +42,6 @@ class MovementLayer:
         self.stop_timer = None
 
     def process_movement_command(self, message: str):
-        """
-        Llama al LLM para obtener comando(s) de movimiento en formato JSON.
-        Se espera que la respuesta sea un objeto JSON simple o un arreglo JSON.
-        Inmediatamente lanza la ejecución de los comandos en un hilo.
-        """
         system_prompt = self.config.get("system_prompt", "")
         messages_payload = [
             {"role": "system", "content": system_prompt},
@@ -57,12 +57,12 @@ class MovementLayer:
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            content = ""
             if "message" in data and isinstance(data["message"], dict):
-                content = data["message"].get("content", "")
+                content = data["message"].get("content", "").strip()
             elif "response" in data:
-                content = data["response"]
-            content = content.strip()
+                content = data["response"].strip()
+            else:
+                content = ""
             self.logger.info(f"Respuesta del LLM para movimiento: {content}")
             command = json.loads(content)
         except Exception as e:
@@ -70,23 +70,15 @@ class MovementLayer:
             self.logger.error(err_msg)
             return None, err_msg
 
-        # Lanzar la ejecución de comandos en un hilo para no bloquear
         threading.Thread(target=self.execute_commands, args=(command,)).start()
-        # Retornamos el comando y un mensaje interno de que se inició la ejecución
         return command, "Comando recibido y en ejecución."
 
     def execute_commands(self, command):
-        """
-        Ejecuta el/los comando(s) recibidos (JSON) de forma secuencial.
-        Cada comando se ejecuta publicando el mensaje de Twist y se programa
-        la detención mediante un Timer sin bloquear el hilo principal.
-        """
         def execute_single_command(cmd):
             try:
                 if "linear_x" in cmd:
                     linear_x = float(cmd["linear_x"])
                 else:
-                    # Si es giro y no se define linear_x, usar 0.
                     if "angular_z" in cmd and float(cmd["angular_z"]) != 0:
                         linear_x = 0.0
                     else:
@@ -109,7 +101,6 @@ class MovementLayer:
             self.cmd_vel_pub.publish(twist)
             self.logger.info(f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}")
 
-            # Programar la detención tras 'duration' segundos si es mayor que 0
             if duration > 0:
                 def stop_robot():
                     stop_twist = Twist()
@@ -120,7 +111,7 @@ class MovementLayer:
                 self.stop_timer = threading.Timer(duration, stop_robot)
                 self.stop_timer.daemon = True
                 self.stop_timer.start()
-        # Si se trata de varios comandos
+
         if isinstance(command, list):
             for cmd in command:
                 execute_single_command(cmd)
@@ -132,33 +123,100 @@ class MovementLayer:
         else:
             execute_single_command(command)
 
+def remove_accents(input_str):
+    """Elimina acentos y caracteres diacríticos de la cadena."""
+    nfkd_form = unicodedata.normalize('NFD', input_str)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
 class OrionChatMovementNode(Node):
     def __init__(self):
         super().__init__("orion_chat_movement")
-        self.subscription = self.create_subscription(String, "orion_input", self.listener_callback, 10)
-        self.response_pub = self.create_publisher(String, "orion_response", 10)
+        self.qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        self.subscription = self.create_subscription(
+            String,
+            'orion_input',
+            self.listener_callback,
+            qos_profile=self.qos
+        )
+        self.response_pub = self.create_publisher(
+            String,
+            'orion_response',
+            qos_profile=self.qos
+        )
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.chat_history = deque(maxlen=10)
         self.last_message = None
         self.is_processing = False
-        self.current_mode = "conversation"  # Modo por defecto
+        self.current_mode = "conversation"
 
-        # Cargar archivos de configuración (RAG) desde la carpeta resource
+        # Cargar archivos de configuración
+        self.movement_config    = self.load_resource("movement_config.json")
         self.conversation_config = self.load_resource("conversation_config.json")
-        self.movement_config = self.load_resource("movement_config.json")
 
-        self.movement_layer = MovementLayer(self.movement_config, self.cmd_vel_pub, self.get_logger())
+        # --- Cambio clave: instanciar aquí ---
+        self.movement_layer = MovementLayer(
+            self.movement_config,
+            self.cmd_vel_pub,
+            self.get_logger()
+        )
 
-        # Frases clave para cambiar de modo
-        self.activate_movement_phrases = ["preparate.", "preparate", "Preparate", "Preparate.", "Prepárate."]
-        self.activate_conversation_phrases = ["Hablemos.", "Quiero hablar."]
+        # Inicializar manejo de emoción
+        self.current_emotion = 'neutral'
+        self.emotion_subscriber = self.create_subscription(
+            String,
+            self.conversation_config.get("emotion_topic", "/emotion"),
+            self.emotion_callback,
+            qos_profile=self.qos
+        )
 
-        self.get_logger().info("Nodo iniciado en modo conversación.")
+        # Frases base para difflib
+        bases_mov = ["preparate", "prepárate"]
+        bases_conv = ["hablemos", "quiero hablar"]
+
+        # Variantes con "orion"
+        self.movement_keys = []
+        for p in bases_mov:
+            norm = remove_accents(p)
+            self.movement_keys += [
+                norm,
+                f"orion {norm}",
+                f"{norm} orion",
+            ]
+
+        self.conversation_keys = []
+        for p in bases_conv:
+            norm = remove_accents(p)
+            self.conversation_keys += [
+                norm,
+                f"orion {norm}",
+                f"{norm} orion",
+            ]
+
+        # Construir system_prompt
+        desc    = self.conversation_config["description"]
+        ctx     = self.conversation_config["context"]
+        instr   = "\n".join(self.conversation_config["instructions"])
+        ext_doc = self.conversation_config.get("external_document", "")
+        self.system_prompt = (
+            f"{desc}\n"
+            f"Contexto: {ctx}\n"
+            f"{ext_doc}\n"
+            f"Instrucciones:\n{instr}\n"
+        )
+
+    def emotion_callback(self, msg: String):
+        """Actualiza la emoción actual."""
+        self.current_emotion = msg.data
+        self.get_logger().info(f"Emoción actualizada a: {self.current_emotion}")
+        # Ya no instanciamos movement_layer aquí
 
     def load_resource(self, filename):
-        """Carga un archivo JSON desde la carpeta resource del paquete."""
         try:
-            pkg_share = get_package_share_directory("orion_chat")
+            pkg_share     = get_package_share_directory("orion_chat")
             resources_dir = os.path.join(pkg_share, "resource")
         except Exception as e:
             self.get_logger().error(f"Error al obtener el directorio share: {e}")
@@ -167,15 +225,15 @@ class OrionChatMovementNode(Node):
         if os.path.isdir(resources_dir):
             for file in os.listdir(resources_dir):
                 if file == filename:
-                    filepath = os.path.join(resources_dir, file)
+                    path = os.path.join(resources_dir, file)
                     try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
+                        with open(path, 'r', encoding='utf-8') as f:
                             resource_data = json.load(f)
                         self.get_logger().info(f"Recurso cargado: {file}")
                     except Exception as e:
                         self.get_logger().error(f"Error cargando {file}: {e}")
         else:
-            self.get_logger().warn("No se encontró la carpeta 'resource' en el paquete.")
+            self.get_logger().warn("No se encontró la carpeta 'resource'.")
         return resource_data
 
     def listener_callback(self, msg: String):
@@ -186,31 +244,38 @@ class OrionChatMovementNode(Node):
         user_message = msg.data
         self.get_logger().info(f"Recibido: {user_message}")
         self.chat_history.append(f"Usuario: {user_message}")
-        user_message_lower = user_message.lower().strip()
-        normalized_user_message = remove_accents(user_message_lower)
+        normalized = remove_accents(user_message.lower().replace(",", "").strip())
 
-        # Verificar cambio de modo con coincidencia difusa
-        normalized_movement_phrases = [remove_accents(phrase.lower()) for phrase in self.activate_movement_phrases]
-        if difflib.get_close_matches(normalized_user_message, normalized_movement_phrases, n=1, cutoff=0.8):
-            if self.current_mode != "movement":
-                self.current_mode = "movement"
-                response = "Cambiando a modo movimiento."
-            else:
-                response = "Ya estoy en modo movimiento."
+        # Cambio de modo movimiento
+        if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.8):
+            response = ("Cambiando a modo movimiento." 
+                        if self.current_mode != "movement"
+                        else "Ya estoy en modo movimiento.")
+            self.current_mode = "movement"
             self.publish_response(response)
             self.is_processing = False
             return
 
-        normalized_conversation_phrases = [remove_accents(phrase.lower()) for phrase in self.activate_conversation_phrases]
-        if difflib.get_close_matches(normalized_user_message, normalized_conversation_phrases, n=1, cutoff=0.8):
-            if self.current_mode != "conversation":
-                self.current_mode = "conversation"
-                response = "Cambiando a modo conversación. Podemos seguir dialogando normalmente."
-            else:
-                response = "Ya estoy en modo conversación."
+        # Cambio de modo conversación
+        if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.8):
+            response = ("Cambiando a modo conversación. Podemos seguir dialogando normalmente."
+                        if self.current_mode != "conversation"
+                        else "Ya estoy en modo conversación.")
+            self.current_mode = "conversation"
             self.publish_response(response)
             self.is_processing = False
             return
+
+        # Procesar según modo
+        if self.current_mode == "movement":
+            threading.Thread(
+                target=self.handle_movement_command,
+                args=(user_message,),
+                daemon=True
+            ).start()
+        else:
+            augmented = self.generate_augmented_prompt(user_message)
+            self.process_stream(augmented)
 
         # Procesar según el modo actual
         if self.current_mode == "movement":
@@ -224,75 +289,116 @@ class OrionChatMovementNode(Node):
         self.is_processing = False
 
     def handle_movement_command(self, user_message):
-        """
-        Procesa el mensaje en modo movimiento:
-          1. Obtiene el/los comando(s) LLM en formato JSON y lanza su ejecución de forma asíncrona.
-          2. En paralelo, solicita al LLM una respuesta natural basada en el mensaje del usuario.
-        """
-        # Llamada al LLM para obtener comando(s) y lanzar su ejecución (no espera a que se terminen)
-        command, internal_msg = self.movement_layer.process_movement_command(user_message)
+        command, _ = self.movement_layer.process_movement_command(user_message)
         self.get_logger().info(f"Comando JSON recibido: {command}")
-
-        # Lanzar en otro hilo la solicitud de confirmación en lenguaje natural,
-        # utilizando únicamente el mensaje original del usuario.
-        threading.Thread(target=self.send_natural_confirmation, args=(user_message,)).start()
+        threading.Thread(
+            target=self.send_natural_confirmation,
+            args=(user_message,),
+            daemon=True
+        ).start()
 
     def send_natural_confirmation(self, user_message):
         """
-        Solicita al LLM que responda en lenguaje natural confirmando la acción a partir del mensaje original.
-        La respuesta se publica en el tópico de salida.
+        Solicita al LLM una confirmación en lenguaje natural en streaming,
+        publicando cada frase según llegue.
         """
+        # Prepara modo streaming
+        self.streaming_mode = True
+        self.first_stream_message_sent = False
+
+        # Construye el prompt de confirmación
         confirmation_prompt = (
-            "Responde de forma natural confirmando la acción de movimiento, sin incluir datos técnicos. "
+            "Responde de forma natural confirmando la acción de movimiento, "
+            "sin incluir datos técnicos. "
             f"El usuario indicó: '{user_message}'."
         )
+        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."
+
         payload = {
-            "model": "llama3.1",
+            "model": "gemma3",
             "messages": [
-                {"role": "system", "content": "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."},
-                {"role": "user", "content": confirmation_prompt}
+                {"role": "system",   "content": system_prompt},
+                {"role": "user",     "content": confirmation_prompt}
             ],
-            "stream": False
+            "stream": True
         }
+
         url = "http://localhost:11434/api/chat"
         try:
-            response = requests.post(url, json=payload)
+            # peticion en streaming
+            response = requests.post(url, json=payload, stream=True)
             response.raise_for_status()
-            data = response.json()
-            content = ""
-            if "message" in data and isinstance(data["message"], dict):
-                content = data["message"].get("content", "")
-            elif "response" in data:
-                content = data["response"]
-            content = content.strip()
         except Exception as e:
-            content = f"Error al obtener confirmación: {e}"
-        # Publicar solo la respuesta natural (para TTS)
-        self.publish_response(content)
+            self.get_logger().error(f"Error al comunicarse para confirmación: {e}")
+            # Publica un único mensaje de error
+            self.publish_response(f"[ORION]: Error al obtener confirmación: {e}")
+            self.streaming_mode = False
+            return
+
+        buffer = ""
+
+
+        # Procesa cada línea de la respuesta stream
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            token_received = True
+            try:
+                data = json.loads(line)
+                # Extrae el token o el content dentro de message
+                token = data.get("token")
+                if token is None:
+                    msg_obj = data.get("message")
+                    token = msg_obj.get("content", "") if isinstance(msg_obj, dict) else ""
+                buffer += token
+
+                # Cuando llegamos a un signo de puntuación, publicamos la frase completa
+                if buffer and (
+                    buffer[-1] in { '!', '?'}
+                    or re.search(r'(?<!\d)\.(?!\d)$', buffer)
+                ):
+                    phrase = buffer.strip()
+                    self.publish_response(phrase)
+                    # Opcional: llevar historial de confirmaciones
+                    self.chat_history.append(f"[ORION]: {phrase}")
+                    buffer = ""
+            except Exception as e:
+                self.get_logger().error(f"Error procesando token de confirmación: {e}")
+
+        # Si quedó algo en el buffer, publicarlo también
+        if buffer:
+            self.publish_response(buffer.strip())
+            self.chat_history.append(f"[ORION]: {buffer.strip()}")
+
+        # Fin del streaming
+        self.streaming_mode = False
 
     def generate_augmented_prompt(self, user_message):
         history_text = "\n".join(list(self.chat_history))
-        system_prompt = self.conversation_config.get("system_prompt", "")
+# Usar el prompt construido a partir de las instrucciones
+        system_prompt = self.system_prompt        
         external_document = self.conversation_config.get("external_document", "")
         prompt = (
-            f"{system_prompt}\n\n"
+            f"{system_prompt}\n"
+            f"El usuario está sintiendo **{self.current_emotion}**.\n\n"
             f"Contexto reciente:\n{history_text}\n\n"
             f"Documentos adicionales:\n{external_document}\n\n"
             f"Pregunta del usuario: {user_message}\n\n"
-            f"Responde de forma natural y conversacional."
+            f"Responde de forma natural y breve, y formatea la salida como \"[{self.current_emotion}]: respuesta\"."
         )
         return prompt
 
     def process_stream(self, augmented_prompt):
         self.streaming_mode = True
         self.first_stream_message_sent = False  # Reiniciamos para la nueva respuesta en streaming
-        system_prompt = self.conversation_config.get("system_prompt", "")
+        # Usar el system_prompt completo construido en __init__
+        system_prompt = self.system_prompt
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": augmented_prompt}
         ]
         payload = {
-            "model": "llama3.1",
+            "model": "gemma3",
             "messages": messages,
             "stream": True
         }
@@ -304,7 +410,6 @@ class OrionChatMovementNode(Node):
             self.get_logger().error(f"Error al comunicarse con Ollama: {e}")
             return
         buffer = ""
-        punctuation_marks = {'.', ',', '!', '?'}
         self.get_logger().info("Respuesta del LLM (streaming):")
         token_found = False
         for line in response.iter_lines(decode_unicode=True):
@@ -319,10 +424,13 @@ class OrionChatMovementNode(Node):
                             token = message.get("content", "")
                     print(token, end='', flush=True)
                     buffer += token
-                    if token and token[-1] in punctuation_marks:
+                    if buffer and (
+                        buffer[-1] in { '!', '?'}
+                        or re.search(r'(?<!\d)\.(?!\d)$', buffer)
+                    ):
                         phrase = buffer.strip()
                         self.publish_response(phrase)
-                        self.chat_history.append(f"ORION: {phrase}")
+                        self.chat_history.append(f"[ORION]: {phrase}")
                         buffer = ""
                 except Exception as e:
                     self.get_logger().error(f"Error procesando stream: {e}")
@@ -331,23 +439,25 @@ class OrionChatMovementNode(Node):
         if buffer:
             phrase = buffer.strip()
             self.publish_response(phrase)
-            self.chat_history.append(f"ORION: {phrase}")
+            self.chat_history.append(f"[ORION]: {phrase}")
         self.streaming_mode = False  # Finalizamos el modo streaming al terminar
 
 
     def publish_response(self, text: str):
         """Publica la respuesta (solo lenguaje natural) en el tópico de salida (TTS)."""
+        """ Quitar un posible prefijo "[ORION]:" que ya venga en el texto """
+        clean_text = re.sub(r'^\s*\[ORION\]\s*:\s*', '', text)
         msg = String()
         if getattr(self, 'streaming_mode', False):
             # Si estamos en streaming, solo al primer mensaje se le agrega el prefijo
             if not getattr(self, 'first_stream_message_sent', False):
-                msg.data = f"[ORION]: {text}"
+                msg.data = f"[ORION]: {clean_text}"
                 self.first_stream_message_sent = True
             else:
-                msg.data = text
+                msg.data = clean_text
         else:
             # Para respuestas que no son streaming, se agrega el prefijo siempre.
-            msg.data = f"[ORION]: {text}"
+            msg.data = f"[ORION]: {clean_text}"
         self.response_pub.publish(msg)
         self.get_logger().info(f"Respuesta publicada: {msg.data}")
 

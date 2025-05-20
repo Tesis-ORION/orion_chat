@@ -1,9 +1,9 @@
 # Orion Chat 🤖💬
 
-![ROS 2](https://img.shields.io/badge/ROS2-Jazzy-blue) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-orange) ![Python](https://img.shields.io/badge/Python-3.12-yellow)
+![ROS 2](https://img.shields.io/badge/ROS2-Jazzy-blue) ![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-orange) ![Python](https://img.shields.io/badge/Python-3.12-yellow) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Tesis-ORION/orion_chat)
 
 ## 🚀 Overview
-**Orion Chat** is a ROS 2 Jazzy package that orchestrates speech‑to‑text (STT), chat engine, and text‑to‑speech (TTS) nodes using a single launch file. It runs on Ubuntu 24.04 with support for Ignition Harmonic simulation, integrating Whisper for STT, OLLAMA for language processing, and gTTS for TTS, enabling seamless human–robot interaction.
+**Orion Chat** is a ROS 2 Jazzy package that orchestrates speech‑to‑text (STT), chat engine, and text‑to‑speech (TTS) nodes using a single launch file. It runs on Ubuntu 24.04 with support for Ignition Harmonic simulation, integrating Whisper for STT, OLLAMA for language processing, and edge-TTS for TTS, enabling seamless human–robot interaction.
 
 https://github.com/user-attachments/assets/bf1b94ce-0228-48e8-b0cc-685e6ba14beb
 
@@ -45,7 +45,7 @@ ros2_ws/
     │   │   └── orion_launch.py  # Single launch for STT, Chat, TTS
     │   ├── orion_chat/         # Chat logic & prompt loader
     │   ├── stt_node.py         # STT node (Whisper)
-    │   ├── tts_node.py         # TTS node (gTTS + pygame)
+    │   ├── tts_node.py         # TTS node (edge-TTS + pygame)
     │   ├── resource/           # JSON prompts and user data
     │   └── sounds/             # Activation audio (MP3)
     ├── install/                # colcon install output
@@ -64,8 +64,8 @@ ros2_ws/
 - **Description:** Processes text with an LLM via the OLLAMA API using `resource/orion_prompt.json`.
 
 ### 🗣️ Text‑to‑Speech (TTS)
-- **Executable:** `orion_tts`  
-- **Description:** Converts text responses into speech using gTTS and plays back via pygame.
+- **Executable:** `orion_tts`
+- **Description:** Converts text responses into speech using edge-TTS and plays back via pygame.
 
 ## 🔧 Usage
 

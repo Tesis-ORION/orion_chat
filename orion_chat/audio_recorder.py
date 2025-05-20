@@ -1,115 +1,136 @@
 #!/usr/bin/env python3
-import sys
-import tempfile
-import threading
+import uuid
 import queue
-import wave
-import os
-import requests
+import struct
+import webrtcvad
+import sounddevice as sd
+import numpy as np
+from loguru import logger
 import rclpy
 from rclpy.node import Node
+from std_msgs.msg import Bool
+from audio_messages.msg import AudioInfo, AudioData
 
-# Configuración
-FLASK_URL = "http://localhost:5000/upload"
-SAMPLE_RATE = 16000       # Frecuencia de muestreo en Hz
-CHANNELS = 1              # Mono
-
-class AudioRecorderNode(Node):
+class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.get_logger().info("AudioRecorderNode inicializado.")
+        self.energy_threshold = 0.02
+        # Publishers
+        self.pub_web  = self.create_publisher(Bool,      'web',        10)
+        self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
+        self.pub_data = self.create_publisher(AudioData, 'audio_data', 10)
+
+        # Audio config
+        default_dev      = sd.default.device[0]
+        self.sample_rate = 48000
+        self.channels    = 1
+
+        # VAD config
+        self.vad = webrtcvad.Vad(2)  # Modo agresividad 0–3 
+        self.frame_ms     = 30       # Duración de frame en ms (10,20 o 30) 
+        self.frame_size   = int(self.sample_rate * self.frame_ms / 1000)
+        self.byte_per_frame = self.frame_size * 2  # 16-bit PCM -> 2 bytes
+
+        # State machine thresholds
+        self.max_silence_frames = int(0.5 * 1000 / self.frame_ms)  # 0.5 s de silencio
+        self.min_speech_frames  = int(0.1 * 1000 / self.frame_ms)  # 0.1 s de habla antes de START 
+
+        logger.info(f"Device: {default_dev} @ {self.sample_rate}Hz")
 
     def run(self):
-        # Bucle principal: graba y envía continuamente
-        while rclpy.ok():
-            # 1) Espera ENTER para comenzar
-            self.get_logger().info("Presiona ENTER para comenzar a grabar...")
-            try:
-                input()
-            except EOFError:
-                break
+        q = queue.Queue()
+        # Callback para InputStream: envía bloques raw PCM al queue
+        def callback(indata, frames, time, status):
+            if status:
+                logger.warning(f"PortAudio status: {status}")
+            q.put(bytes(indata))
 
-            # 2) Preparar grabación
-            record_queue = queue.Queue()
-            stop_event = threading.Event()
 
-            def callback(indata, frames, time, status):
-                if status:
-                    print(f"[!] {status}", file=sys.stderr)
-                record_queue.put(indata.copy())
-
-            # 3) Iniciar grabación en hilo
-            recorder = threading.Thread(
-                target=self._record_audio,
-                args=(record_queue, stop_event, callback),
-                daemon=True
-            )
-            recorder.start()
-
-            # 4) Detener con ENTER
-            self.get_logger().info("Grabando... presiona ENTER nuevamente para detener.")
-            input()
-            stop_event.set()
-            recorder.join()
-            self.get_logger().info("Grabación finalizada.")
-
-            # 5) Recolectar frames
-            frames = []
-            while not record_queue.empty():
-                frames.append(record_queue.get())
-
-            # 6) Guardar WAV temporal
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                wav_path = tmp.name
-            with wave.open(wav_path, 'wb') as wf:
-                wf.setnchannels(CHANNELS)
-                wf.setsampwidth(2)  # 16 bits = 2 bytes
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(b''.join(frames))
-            self.get_logger().info(f"Audio guardado en {wav_path}")
-
-            # 7) Enviar al servidor Flask en segundo plano (silencioso)
-            threading.Thread(target=self._send_audio, args=(wav_path,), daemon=True).start()
-
-            # 8) Esperar ENTER para iniciar siguiente grabación
-            self.get_logger().info("Presiona ENTER para iniciar la siguiente grabación.")
-            try:
-                input()
-            except EOFError:
-                break
-
-        self.get_logger().info("AudioRecorderNode finalizado.")
-
-    def _send_audio(self, wav_path):
-        try:
-            with open(wav_path, 'rb') as f:
-                files = {'file': (os.path.basename(wav_path), f, 'audio/wav')}
-                resp = requests.post(FLASK_URL, files=files)
-                resp.raise_for_status()
-            # Eliminar archivo temporal tras envío exitoso
-            os.remove(wav_path)
-        except Exception as e:
-            self.get_logger().error(f"Error al enviar audio o eliminar archivo: {e}")
-
-    def _record_audio(self, record_queue, stop_event, callback):
-        import sounddevice as sd
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
+        stream = sd.RawInputStream(
+            samplerate=self.sample_rate,
+            blocksize=self.frame_size,
             dtype='int16',
+            channels=self.channels,
             callback=callback
-        ):
-            while not stop_event.is_set():
-                sd.sleep(100)
+        )
+        stream.start()
+        self.get_logger().info("Recorder activo con WebRTC VAD")
 
+        try:
+            ring_buffer = []
+            speech_frames = []
+            in_speech = False
+            silence_count = 0
+            speech_count = 0
+
+            while rclpy.ok():
+                frame = q.get()  # Bloque de 16-bit PCM
+                pcm = np.frombuffer(frame, dtype=np.int16)
+                energy_level = np.max(np.abs(pcm)) / 32768.0
+                vad_flag  = self.vad.is_speech(frame, self.sample_rate)
+                is_speech = vad_flag and (energy_level > self.energy_threshold)
+                if not in_speech:
+                    # Buscamos el inicio de la frase
+                    ring_buffer.append(frame)
+                    if len(ring_buffer) > self.min_speech_frames:
+                        ring_buffer.pop(0)
+                    if is_speech:
+                        speech_count += 1
+                        if speech_count > self.min_speech_frames:
+                            # Utterance START
+                            uid = str(uuid.uuid4())
+                            self.pub_web.publish(Bool(data=False))
+                            info = AudioInfo(
+                                num_channels=self.channels,
+                                sample_rate=self.sample_rate,
+                                subtype='int16',
+                                uuid=uid
+                            )
+                            self.pub_info.publish(info)
+                            self.get_logger().info(f"Utterance START uuid={uid}")
+                            # Iniciar buffer de voz con pre-roll
+                            speech_frames = ring_buffer.copy()
+                            in_speech = True
+                            silence_count = 0
+                    else:
+                        speech_count = 0
+                else:
+                    # Dentro de una frase, acumulamos el frame
+                    speech_frames.append(frame)
+                    if not is_speech:
+                        silence_count += 1
+                        if silence_count > self.max_silence_frames:
+                            # Utterance END
+                            full_data = b''.join(speech_frames)
+                            # Convertir a float32 para AudioData
+                            pcm = np.frombuffer(full_data, dtype=np.int16).astype(np.float32) / 32768.0
+                            msg = AudioData()
+                            msg.data = pcm.flatten().tolist()
+                            self.pub_data.publish(msg)
+                            self.get_logger().info(
+                                f"Utterance END uuid={uid}, frames={len(speech_frames)}"
+                            )
+                            # Reset
+                            in_speech = False
+                            speech_count = 0
+                            ring_buffer.clear()
+                    else:
+                        silence_count = 0
+
+                # Girar ROS en hilo aparte no bloqueante
+                rclpy.spin_once(self, timeout_sec=0)
+
+        finally:
+            stream.stop()
+            stream.close()
 
 def main(args=None):
     rclpy.init(args=args)
-    node = AudioRecorderNode()
+    node = AudioRecorder()
     try:
         node.run()
     except KeyboardInterrupt:
-        node.get_logger().info("Interrupción manual, terminando.")
+        pass
     finally:
         node.destroy_node()
         rclpy.shutdown()
