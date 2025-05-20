@@ -123,6 +123,10 @@ class MovementLayer:
         else:
             execute_single_command(command)
 
+def remove_accents(input_str):
+    """Elimina acentos y caracteres diacríticos de la cadena."""
+    nfkd_form = unicodedata.normalize('NFD', input_str)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 class OrionChatMovementNode(Node):
     def __init__(self):
@@ -273,6 +277,15 @@ class OrionChatMovementNode(Node):
             augmented = self.generate_augmented_prompt(user_message)
             self.process_stream(augmented)
 
+        # Procesar según el modo actual
+        if self.current_mode == "movement":
+            # En modo movimiento, se lanza el procesamiento en un hilo
+            threading.Thread(target=self.handle_movement_command, args=(user_message,)).start()
+            self.is_processing = False
+            return
+        else:
+            augmented_prompt = self.generate_augmented_prompt(user_message)
+            self.process_stream(augmented_prompt)
         self.is_processing = False
 
     def handle_movement_command(self, user_message):

@@ -40,7 +40,6 @@ ask_set_env
 # ------------------------------------------------
 echo "Actualizando repositorios e instalando paquetes..."
 sudo apt update
-
 sudo apt install -y portaudio19-dev \
                     libasound2-dev \
                     alsa-utils \

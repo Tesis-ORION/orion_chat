@@ -3,7 +3,6 @@ import os
 from setuptools import find_packages, setup
 
 
-
 package_name = 'orion_chat'
 
 setup(
@@ -21,7 +20,7 @@ setup(
         ('share/' + package_name + '/worlds', glob.glob('worlds/*.sdf'))
 
 
-    ],
+    ] + get_data_files('model', os.path.join('share', package_name, 'model')),
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='alexoberco',

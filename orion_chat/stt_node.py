@@ -18,7 +18,6 @@ from audio_messages.msg import AudioInfo, AudioData
 class OrionSTTNode(Node):
     def __init__(self):
         super().__init__('orion_stt')
-
         # Publicador final de texto
         self.pub_text = self.create_publisher(String, 'orion_input', 10)
 
@@ -117,7 +116,6 @@ class OrionSTTNode(Node):
                  subtype='FLOAT')
         self.get_logger().debug(f"WAV temporal resampleado escrito en {tmp_path}")
         return tmp_path
-
 
 def main(args=None):
     rclpy.init(args=args)

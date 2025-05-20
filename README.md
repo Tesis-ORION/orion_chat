@@ -64,7 +64,7 @@ ros2_ws/
 - **Description:** Processes text with an LLM via the OLLAMA API using `resource/orion_prompt.json`.
 
 ### 🗣️ Text‑to‑Speech (TTS)
-- **Executable:** `orion_tts`  
+- **Executable:** `orion_tts`
 - **Description:** Converts text responses into speech using edge-TTS and plays back via pygame.
 
 ## 🔧 Usage
@@ -101,7 +101,6 @@ ros2 launch orion_chat orion_gz_launch.py
 2. Create a branch (`feature/...`)  
 3. Commit your changes and add tests  
 4. Open a Pull Request against `main`
-
 
 ## 📜 License
 **MIT License** – Permissive and ensures attribution. See [LICENSE](LICENSE).
