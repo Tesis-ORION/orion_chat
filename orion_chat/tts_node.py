@@ -45,6 +45,7 @@ class OrionTTS(Node):
             format   = pyaudio.paInt16,
             channels = 1,
             rate     = self._audio_rate,
+            frames_per_buffer= 4096,
             output   = True
         )
         # Lanzar 2 hilos TTS
