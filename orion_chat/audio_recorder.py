@@ -11,21 +11,11 @@ from rclpy.node import Node
 from std_msgs.msg import Bool
 from audio_messages.msg import AudioInfo, AudioData
 
-def find_preferred_device(keywords):
-    """
-    Busca el primer device cuyo name contenga alguna de las keywords
-    y que tenga canales de entrada (>0). Devuelve (índice, nombre).
-    """
-    devices = sd.query_devices()
-    for i, dev in enumerate(devices):
-        name = dev['name'].lower()
-        if dev['max_input_channels'] > 0 and any(k in name for k in keywords):
-            return i, dev['name']
-    raise RuntimeError(f"No se encontró ningún dispositivo que contenga {keywords}")
+
 class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.energy_threshold = 0.3
+        self.energy_threshold = 0.02
         # Publishers
         self.pub_web  = self.create_publisher(Bool,      'web',        10)
         self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
@@ -34,12 +24,7 @@ class AudioRecorder(Node):
         # Audio config
         #default_dev      = sd.default.device[0]
         # Encuentra el índice cuyo name contenga "pipewire"
-        keywords = ['pipewire', 'pulse']
-
-        idx, name = find_preferred_device(keywords)
-        # Fijar el dispositivo de entrada al índice encontrado, sin salida
-        sd.default.device = (idx, None)
-        print(f"Usando dispositivo #{idx}: {sd.query_devices()[idx]['name']}")
+        
         self.sample_rate = 48000
         self.channels    = 1
 
@@ -50,7 +35,7 @@ class AudioRecorder(Node):
         self.byte_per_frame = self.frame_size * 2  # 16-bit PCM -> 2 bytes
 
         # State machine thresholds
-        self.max_silence_frames = int(0.5 * 1000 / self.frame_ms)  # 0.5 s de silencio
+        self.max_silence_frames = int(1.0 * 1000 / self.frame_ms)  # 1.0 s de silencio
         self.min_speech_frames  = int(0.1 * 1000 / self.frame_ms)  # 0.1 s de habla antes de START 
 
         logger.info(f"Device: {sd.default.device} @ {self.sample_rate}Hz")
