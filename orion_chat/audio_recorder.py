@@ -11,20 +11,17 @@ from rclpy.node import Node
 from std_msgs.msg import Bool
 from audio_messages.msg import AudioInfo, AudioData
 
-
 class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.energy_threshold = 0.02
+        self.energy_threshold = 0.2
         # Publishers
         self.pub_web  = self.create_publisher(Bool,      'web',        10)
         self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
         self.pub_data = self.create_publisher(AudioData, 'audio_data', 10)
 
         # Audio config
-        #default_dev      = sd.default.device[0]
-        # Encuentra el índice cuyo name contenga "pipewire"
-        
+        default_dev      = sd.default.device[0]
         self.sample_rate = 48000
         self.channels    = 1
 
@@ -38,7 +35,7 @@ class AudioRecorder(Node):
         self.max_silence_frames = int(1.0 * 1000 / self.frame_ms)  # 1.0 s de silencio
         self.min_speech_frames  = int(0.1 * 1000 / self.frame_ms)  # 0.1 s de habla antes de START 
 
-        logger.info(f"Device: {sd.default.device} @ {self.sample_rate}Hz")
+        logger.info(f"Device: {default_dev} @ {self.sample_rate}Hz")
 
     def run(self):
         q = queue.Queue()
