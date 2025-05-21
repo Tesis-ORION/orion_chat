@@ -14,7 +14,7 @@ from audio_messages.msg import AudioInfo, AudioData
 class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.energy_threshold = 0.2
+        self.energy_threshold = 0.3
         # Publishers
         self.pub_web  = self.create_publisher(Bool,      'web',        10)
         self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
