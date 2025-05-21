@@ -265,18 +265,7 @@ class OrionChatMovementNode(Node):
             self.publish_response(response)
             self.is_processing = False
             return
-
-        # Procesar según modo
-        if self.current_mode == "movement":
-            threading.Thread(
-                target=self.handle_movement_command,
-                args=(user_message,),
-                daemon=True
-            ).start()
-        else:
-            augmented = self.generate_augmented_prompt(user_message)
-            self.process_stream(augmented)
-
+        
         # Procesar según el modo actual
         if self.current_mode == "movement":
             # En modo movimiento, se lanza el procesamiento en un hilo
