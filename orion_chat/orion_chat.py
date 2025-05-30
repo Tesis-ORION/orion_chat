@@ -70,6 +70,7 @@ class MovementLayer:
             self.logger.error(err_msg)
             return None, err_msg
 
+
         threading.Thread(target=self.execute_commands, args=(command,), daemon=True).start()
         return command, "Comando recibido y en ejecución."
 
@@ -98,7 +99,6 @@ class MovementLayer:
             self.cmd_vel_pub.publish(twist)
             self.logger.info(f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}")
 
-            # Programar parada
             if duration > 0:
                 def stop_robot():
                     stop_msg = TwistStamped()
@@ -111,7 +111,9 @@ class MovementLayer:
                 self.stop_timer.daemon = True
                 self.stop_timer.start()
 
+
         # Ejecutar ya sea lista o dict
+
         if isinstance(command, list):
             for cmd in command:
                 execute_single_command(cmd)
@@ -202,7 +204,7 @@ class OrionChatMovementNode(Node):
 
     def load_resource(self, filename):
         try:
-            pkg_share = get_package_share_directory("orion_chat")
+            pkg_share     = get_package_share_directory("orion_chat")
             resources_dir = os.path.join(pkg_share, "resource")
         except Exception as e:
             self.get_logger().error(f"Error al obtener share dir: {e}")
@@ -230,7 +232,6 @@ class OrionChatMovementNode(Node):
         user_message = msg.data.strip()
         self.get_logger().info(f"Recibido: {user_message}")
         self.chat_history.append(f"Usuario: {user_message}")
-
         normalized = remove_accents(user_message.lower().replace(",", "").strip())
 
         # Modo movimiento
@@ -269,6 +270,7 @@ class OrionChatMovementNode(Node):
         self.get_logger().info(f"Comando JSON recibido: {command}")
         threading.Thread(target=self.send_natural_confirmation,
                          args=(user_message,), daemon=True).start()
+
 
     def send_natural_confirmation(self, user_message):
         """

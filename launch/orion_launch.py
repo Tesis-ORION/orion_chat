@@ -34,7 +34,7 @@ def generate_launch_description():
         name="orion_tts",
         output="screen"
     )
-    
+
     delayed_tts = TimerAction(
         period=5.0,
         actions=[tts_node],

@@ -164,7 +164,6 @@ class OrionTTS(Node):
             self.publish_base_turn(-spd); time.sleep(0.3)
             self.publish_base_turn(0.0)
             time.sleep(random.uniform(0.1,0.3))
-
         self.publish_arm_positions(0.0, 0.0)
         self.publish_base_turn(0.0)
 
