@@ -14,7 +14,7 @@ from audio_messages.msg import AudioInfo, AudioData
 class AudioRecorder(Node):
     def __init__(self):
         super().__init__('audio_recorder')
-        self.energy_threshold = 0.02
+        self.energy_threshold = 0.4
         # Publishers
         self.pub_web  = self.create_publisher(Bool,      'web',        10)
         self.pub_info = self.create_publisher(AudioInfo, 'audio_info', 10)
@@ -32,7 +32,7 @@ class AudioRecorder(Node):
         self.byte_per_frame = self.frame_size * 2  # 16-bit PCM -> 2 bytes
 
         # State machine thresholds
-        self.max_silence_frames = int(0.5 * 1000 / self.frame_ms)  # 0.5 s de silencio
+        self.max_silence_frames = int(1.0 * 1000 / self.frame_ms)  # 1.0 s de silencio
         self.min_speech_frames  = int(0.1 * 1000 / self.frame_ms)  # 0.1 s de habla antes de START 
 
         logger.info(f"Device: {default_dev} @ {self.sample_rate}Hz")

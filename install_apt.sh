@@ -11,7 +11,7 @@ ask_set_env() {
     echo
     echo "  export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET"
     echo "  export ROS_STATIC_PEERS=\"\""
-    echo "  export ROS_DOMAIN_ID=42"
+    echo "  export ROS_DOMAIN_ID=0"
     echo
     echo "Podrás unsetearlas o modificarlas más tarde a tu gusto."
     echo
@@ -23,7 +23,7 @@ ask_set_env() {
     if [[ "$response" =~ ^(y|yes|"" ) ]]; then
         export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
         export ROS_STATIC_PEERS=""
-        export ROS_DOMAIN_ID=42
+        export ROS_DOMAIN_ID=0
         echo ">> Variables de entorno aplicadas."
     else
         echo ">> Variables de entorno NO aplicadas."
@@ -46,6 +46,8 @@ sudo apt install -y portaudio19-dev \
                     ffmpeg \
                     mpg123 \
                     python-is-python3 \
-                    python3-pip
+                    python3-pip \
+                    pulseaudio \
+                    pulseaudio-utils 
 
 echo "Instalación completada."
