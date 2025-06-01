@@ -366,7 +366,7 @@ class OrionChatMovementNode(Node):
             f"Contexto reciente:\n{history_text}\n\n"
             f"Documentos adicionales:\n{external_document}\n\n"
             f"Pregunta del usuario: {user_message}\n\n"
-            f"Responde de forma natural y breve, y formatea la salida como \"[{self.current_emotion}]: respuesta\"."
+            f"Responde de forma natural y breve, y a demas que la respuesta sea reactiva a {self.current_emotion} es decir que esta emocion se vea reflejada en tu forma de responder."
         )
         return prompt
 
