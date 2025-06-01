@@ -50,13 +50,20 @@ class MovementLayer:
         payload = {
             "model": "qwen2.5:3b",
             "messages": messages_payload,
-            "stream": False
+            "top_p": 1.0,
+            "stream": False,
+            "temperature": 0.0,
+            "stop": ["}", "]"]
         }
         url = "http://localhost:11434/api/chat"
         try:
+            t0 = time.perf_counter()  
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
+            t1 = time.perf_counter()                           # ← FIN medición
+            llm_latency = (t1 - t0) * 1000
+            self.logger.info(f"[METRIC][LLM] Movement LLM latency: {llm_latency:.1f} ms")
             if "message" in data and isinstance(data["message"], dict):
                 content = data["message"].get("content", "").strip()
             elif "response" in data:
@@ -379,8 +386,11 @@ class OrionChatMovementNode(Node):
         }
         url = "http://localhost:11434/api/chat"
         try:
+            t0 = time.perf_counter()
             response = requests.post(url, json=payload, stream=True)
             response.raise_for_status()
+            t1 = time.perf_counter()
+            self.get_logger().info(f"[METRIC][LLM] Conversational LLM latency (setup): {(t1 - t0)*1000:.1f} ms")
         except Exception as e:
             self.get_logger().error(f"Error al comunicarse con Ollama: {e}")
             return

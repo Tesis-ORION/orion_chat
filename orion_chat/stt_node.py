@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import tempfile
+from time import perf_counter
 import uuid
 
 import numpy as np
@@ -56,10 +57,14 @@ class OrionSTTNode(Node):
 
         try:
             # Transcribir forzando español
+            t0 = perf_counter()
             result = self.whisper_model.transcribe(
                 wav_path,
                 language='es'
             )
+            t1 = perf_counter()
+            latency_ms = (t1 - t0) * 1000
+            self.get_logger().info(f"[METRIC][STT] Transcription latency: {latency_ms:.1f} ms")
             transcript = result.get("text", "").strip()
             self.get_logger().info(f"Transcripción: {transcript!r}")
 

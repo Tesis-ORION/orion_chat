@@ -84,6 +84,7 @@ class OrionTTS(Node):
                 continue
 
             text = re.sub(r'^\s*\[?[Oo][Rr][Ii][Oo][Nn]\]?:?\s*', '', raw)
+            t0 = time.perf_counter()
             ff = subprocess.Popen(
                 ["ffmpeg", "-i", "pipe:0",
                  "-f", "s16le", "-ar", str(self._audio_rate),
@@ -113,6 +114,9 @@ class OrionTTS(Node):
                     self._stream.write(chunk)
                 self.speaking = False
             ff.wait()
+            t1 = time.perf_counter()
+            synth_ms = (t1 - t0) * 1000
+            self.get_logger().info(f"[METRIC][TTS] Synthesis latency for “{text[:20]}…”: {synth_ms:.1f} ms")
 
             if text == "Cambiando a modo movimiento.":
                 self.autonomous_life_enabled = False
