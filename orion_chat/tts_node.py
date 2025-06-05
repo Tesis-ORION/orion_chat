@@ -39,6 +39,16 @@ class OrionTTS(Node):
             self.qos
         )
 
+        # Variables para llevar el “último comando” de brazos y base
+        self._current_left_angle  = 0.0
+        self._current_right_angle = 0.0
+        self._current_speed       = 0.0
+
+        # Timers para republicar continuamente a 30 Hz
+        timer_period = 1.0 / 30.0  # 30 Hz
+        self.create_timer(timer_period, self._timer_publish_arms)    # publica brazos a 30 Hz
+        self.create_timer(timer_period, self._timer_publish_vel)     # publica cmd_vel a 30 Hz
+
         # Subscriber para las respuestas de texto
         self.create_subscription(
             String, 'orion_response', self.on_response,
@@ -138,13 +148,15 @@ class OrionTTS(Node):
     def _gestures_during_speech(self, proc, text):
         if re.search(r'\bhola\b', text, flags=re.IGNORECASE):
             self._wave_salute()
-        base_speeds  = [0.05, 0.08, 0.1, -0.05, -0.08, -0.1]
+        # base_speeds ahora en [0.5, 1.0] (o su negativo)
         left_limits  = [-0.8, -0.6, -0.4, -0.2]
         right_limits = [ 0.2,  0.4,  0.6,  0.8]
 
         while proc.poll() is None and self.gestures_enabled:
-            lt, rt = random.uniform(0.2,0.5), random.uniform(0.2,0.5)
-            la, ra = random.choice(left_limits), random.choice(right_limits)
+            lt = random.uniform(0.2, 0.5)
+            rt = random.uniform(0.2, 0.5)
+            la = random.choice(left_limits)
+            ra = random.choice(right_limits)
 
             threading.Thread(
                 target=lambda: (
@@ -163,11 +175,15 @@ class OrionTTS(Node):
                 daemon=True
             ).start()
 
-            spd = random.choice(base_speeds)
+            # velocidad base entre 0.5 y 1.0 (o negativa)
+            spd = random.choice([
+                random.uniform(0.5, 1.0),
+                -random.uniform(0.5, 1.0)
+            ])
             self.publish_base_turn(spd); time.sleep(0.3)
             self.publish_base_turn(-spd); time.sleep(0.3)
             self.publish_base_turn(0.0)
-            time.sleep(random.uniform(0.1,0.3))
+            time.sleep(random.uniform(0.1, 0.3))
         self.publish_arm_positions(0.0, 0.0)
         self.publish_base_turn(0.0)
 
@@ -176,51 +192,92 @@ class OrionTTS(Node):
         for i in range(steps+1):
             self.publish_arm_positions(None, angle*(i/steps))
             time.sleep(0.1)
-        for i in range(steps,-1,-1):
+        for i in range(steps, -1, -1):
             self.publish_arm_positions(None, angle*(i/steps))
             time.sleep(0.1)
         self.publish_arm_positions(None, 0.0)
 
     def publish_arm_positions(self, left_angle=None, right_angle=None):
+        """Guarda la última posición en las variables y publica inmediatamente."""
         if left_angle is not None:
+            self._current_left_angle = left_angle
             msg = Float64MultiArray()
             msg.data = [left_angle]
             self.pub_left_arm.publish(msg)
         if right_angle is not None:
+            self._current_right_angle = right_angle
             msg = Float64MultiArray()
             msg.data = [right_angle]
             self.pub_right_arm.publish(msg)
 
     def publish_base_turn(self, speed=0.0):
+        """Guarda la última velocidad y publica inmediatamente."""
+        self._current_speed = speed
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.twist.linear.x = 0.0
         msg.twist.angular.z = speed
         self.pub_cmd_vel.publish(msg)
 
+    # --- callbacks periódicos a 30 Hz para brazos y cmd_vel ---
+    def _timer_publish_arms(self):
+        # Publica la última posición guardada de ambos brazos a 30 Hz
+        # (aunque no haya cambiado)
+        msg_left = Float64MultiArray()
+        msg_left.data = [self._current_left_angle]
+        self.pub_left_arm.publish(msg_left)
+
+        msg_right = Float64MultiArray()
+        msg_right.data = [self._current_right_angle]
+        self.pub_right_arm.publish(msg_right)
+
+    def _timer_publish_vel(self):
+        # Publica la última velocidad guardada a 30 Hz
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.twist.linear.x = 0.0
+        msg.twist.angular.z = self._current_speed
+        self.pub_cmd_vel.publish(msg)
+
     def autonomous_life_loop(self):
-        self.publish_arm_positions(0.0,0.0)
+
+        self.publish_arm_positions(0.0, 0.0)
         self.publish_base_turn(0.0)
         while rclpy.ok():
-            time.sleep(random.uniform(5.0,12.0))
+            time.sleep(random.uniform(5.0, 10.0))
             if not self.autonomous_life_enabled or self.speaking:
                 continue
-            lt = random.uniform(-0.3,0.0); rt = random.uniform(0.0,0.3)
-            bs = random.choice([-0.1,0.1])
+            lt = random.uniform(-0.3, 0.0)
+            rt = random.uniform(0.0, 0.3)
+            # --- velocidad base en [0.5, 1.0] (o negativo) ---
+            bs = random.choice([
+                random.uniform(0.5, 1.0),
+                -random.uniform(0.5, 1.0)
+            ])
             steps = 3
-            for i in range(1,steps+1):
-                nl = lt*(i/steps); nr = rt*(i/steps)
-                self.publish_arm_positions(nl,nr); time.sleep(0.2)
-            self.publish_base_turn(bs); time.sleep(0.5)
-            self.publish_base_turn(-bs); time.sleep(0.5)
+            for i in range(1, steps+1):
+                nl = lt * (i / steps)
+                nr = rt * (i / steps)
+                self.publish_arm_positions(nl, nr)
+                time.sleep(0.2)
+
+            self.publish_base_turn(bs)
+            time.sleep(0.5)
+            self.publish_base_turn(-bs)
+            time.sleep(0.5)
             self.publish_base_turn(0.0)
-            for i in range(1,steps+1):
-                nl = lt + (0.0-lt)*(i/steps); nr = rt + (0.0-rt)*(i/steps)
-                self.publish_arm_positions(nl,nr); time.sleep(0.2)
-            self.publish_arm_positions(0.0,0.0); self.publish_base_turn(0.0)
+
+            for i in range(1, steps+1):
+                nl = lt + (0.0 - lt) * (i / steps)
+                nr = rt + (0.0 - rt) * (i / steps)
+                self.publish_arm_positions(nl, nr)
+                time.sleep(0.2)
+
+            self.publish_arm_positions(0.0, 0.0)
+            self.publish_base_turn(0.0)
 
     def send_stop_signals(self):
-        self.publish_arm_positions(0.0,0.0)
+        self.publish_arm_positions(0.0, 0.0)
         self.publish_base_turn(0.0)
         self._stream.stop_stream()
         self._stream.close()
