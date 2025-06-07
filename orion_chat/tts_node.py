@@ -44,10 +44,10 @@ class OrionTTS(Node):
         self._current_right_angle = 0.0
         self._current_speed       = 0.0
 
-        # Timers para republicar continuamente a 30 Hz
-        timer_period = 1.0 / 30.0  # 30 Hz
-        self.create_timer(timer_period, self._timer_publish_arms)    # publica brazos a 30 Hz
-        self.create_timer(timer_period, self._timer_publish_vel)     # publica cmd_vel a 30 Hz
+        # Timers para republicar continuamente a 50 Hz
+        timer_period = 1.0 / 50.0  # 50 Hz
+        self.create_timer(timer_period, self._timer_publish_arms)    # publica brazos a 50 Hz
+        self.create_timer(timer_period, self._timer_publish_vel)     # publica cmd_vel a 50 Hz
 
         # Subscriber para las respuestas de texto
         self.create_subscription(
@@ -219,9 +219,9 @@ class OrionTTS(Node):
         msg.twist.angular.z = speed
         self.pub_cmd_vel.publish(msg)
 
-    # --- callbacks periódicos a 30 Hz para brazos y cmd_vel ---
+    # --- callbacks periódicos a 50 Hz para brazos y cmd_vel ---
     def _timer_publish_arms(self):
-        # Publica la última posición guardada de ambos brazos a 30 Hz
+        # Publica la última posición guardada de ambos brazos a 50 Hz
         # (aunque no haya cambiado)
         msg_left = Float64MultiArray()
         msg_left.data = [self._current_left_angle]
@@ -232,7 +232,7 @@ class OrionTTS(Node):
         self.pub_right_arm.publish(msg_right)
 
     def _timer_publish_vel(self):
-        # Publica la última velocidad guardada a 30 Hz
+        # Publica la última velocidad guardada a 50 Hz
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.twist.linear.x = 0.0

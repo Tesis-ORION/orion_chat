@@ -42,10 +42,10 @@ class MovementLayer:
         self._current_angular_z = 0.0
         self._publish_until     = 0.0  # timestamp en epoch hasta cuando publicar a 30 Hz
 
-        # Timer para publicar a 30 Hz: 1/30 = 0.0333 s
-        timer_period = 1.0 / 30.0  # 30 Hz
+        # Timer para publicar a 50 Hz: 1/50 = 0.05 s
+        timer_period = 1.0 / 50.0  # 50 Hz
         # Cada 0.0333 s llamamos a _timer_publish, que publicará mientras no haya expirado la duración.
-        self._timer = self.node.create_timer(1.0 / 30.0, self._timer_publish)
+        self._timer = self.node.create_timer(1.0 / 50.0, self._timer_publish)
 
     def process_movement_command(self, message: str):
         system_prompt = self.config.get("system_prompt", "")
