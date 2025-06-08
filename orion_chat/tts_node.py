@@ -149,8 +149,8 @@ class OrionTTS(Node):
         if re.search(r'\bhola\b', text, flags=re.IGNORECASE):
             self._wave_salute()
         # base_speeds ahora en [0.5, 1.0] (o su negativo)
-        left_limits  = [-0.8, -0.6, -0.4, -0.2]
-        right_limits = [ 0.2,  0.4,  0.6,  0.8]
+        left_limits  = [-1.0, -1.2, -1.3, -1.4]
+        right_limits = [1.0, 1.2, 1.3, 1.4]
 
         while proc.poll() is None and self.gestures_enabled:
             lt = random.uniform(0.2, 0.5)
@@ -177,8 +177,8 @@ class OrionTTS(Node):
 
             # velocidad base entre 0.5 y 1.0 (o negativa)
             spd = random.choice([
-                random.uniform(0.5, 1.0),
-                -random.uniform(0.5, 1.0)
+                random.uniform(1.0, 1.3),
+                -random.uniform(1.0, 1.3)
             ])
             self.publish_base_turn(spd); time.sleep(0.3)
             self.publish_base_turn(-spd); time.sleep(0.3)
