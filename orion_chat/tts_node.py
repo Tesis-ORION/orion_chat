@@ -278,11 +278,20 @@ class OrionTTS(Node):
                 self.publish_arm_positions(nl, nr)
                 time.sleep(0.2)
 
+            # Duración de cada giro
+            duration = 0.5
+            # Retraso extra entre giros
+            pause = 1.0
+
+            # 1) Gira hacia bs inmediatamente
             self.publish_base_turn(bs)
-            time.sleep(1.0)
-            self.publish_base_turn(-bs)
-            time.sleep(1.0)
-            self.publish_base_turn(0.0)
+            # 2) Después de duration, detente
+            threading.Timer(duration, lambda: self.publish_base_turn(0.0)).start()
+            # 3) Después de duration + pause, gira hacia -bs
+            threading.Timer(duration + pause, lambda: self.publish_base_turn(-bs)).start()
+            # 4) Después de duration*2 + pause, detente de nuevo
+            threading.Timer(duration * 2 + pause, lambda: self.publish_base_turn(0.0)).start()
+
 
             for i in range(1, steps+1):
                 nl = lt + (0.0 - lt) * (i / steps)
