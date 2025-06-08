@@ -264,12 +264,12 @@ class OrionTTS(Node):
             time.sleep(random.uniform(5.0, 10.0))
             if not self.autonomous_life_enabled or self.speaking:
                 continue
-            lt = random.uniform(-0.3, 0.0)
-            rt = random.uniform(0.0, 0.3)
-            # --- velocidad base en [0.5, 1.0] (o negativo) ---
+            lt = random.uniform(-0.5, 0.0)
+            rt = random.uniform(0.0, 0.5)
+            # --- velocidad base en [0.5, 0.7] (o negativo) ---
             bs = random.choice([
-                random.uniform(0.5, 1.0),
-                -random.uniform(0.5, 1.0)
+                random.uniform(0.5, 0.7),
+                -random.uniform(0.5, 0.7)
             ])
             steps = 3
             for i in range(1, steps+1):
@@ -279,9 +279,9 @@ class OrionTTS(Node):
                 time.sleep(0.2)
 
             self.publish_base_turn(bs)
-            time.sleep(0.5)
+            time.sleep(1.0)
             self.publish_base_turn(-bs)
-            time.sleep(0.5)
+            time.sleep(1.)
             self.publish_base_turn(0.0)
 
             for i in range(1, steps+1):
