@@ -281,7 +281,7 @@ class OrionTTS(Node):
             self.publish_base_turn(bs)
             time.sleep(1.0)
             self.publish_base_turn(-bs)
-            time.sleep(1.)
+            time.sleep(1.0)
             self.publish_base_turn(0.0)
 
             for i in range(1, steps+1):
