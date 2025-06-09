@@ -98,11 +98,11 @@ class MovementLayer:
             # --- PARSEO DE PARÁMETROS ---
             try:
                 linear_x = float(cmd.get("linear_x", 
-                    self.config.get("default_forward", {}).get("linear_x", 0.5)))
-                angular_z = float(cmd.get("angular_z", 
-                    self.config.get("default_left", {}).get("angular_z", 0.5)))
+                    self.config.get("default_forward", {}).get("linear_x", 1.0)))
+                angular_z = float(cmd.get("angular_z",
+                    self.config.get("default_left", {}).get("angular_z", 1.0)))
                 duration = float(cmd.get("duration", 
-                    self.config.get("default_forward", {}).get("duration", 2.0)))
+                    self.config.get("default_forward", {}).get("duration", 1.0)))
             except Exception as e:
                 self.logger.error(f"Error en parámetros: {e}")
                 return
@@ -138,16 +138,16 @@ class MovementLayer:
                 # Esperamos la duración completa + pequeño margen antes de pasar al siguiente
                 try:
                     d = float(subcmd.get("duration", 
-                        self.config.get("default_forward", {}).get("duration", 2.0)))
+                        self.config.get("default_forward", {}).get("duration", 1.0)))
                 except Exception:
-                    d = self.config.get("default_forward", {}).get("duration", 2.0)
+                    d = self.config.get("default_forward", {}).get("duration", 1.0)
                 time.sleep(d + 0.1)
         else:
             execute_single(command)
 
     def _timer_publish(self):
         """
-        Este callback se dispara a 30 Hz. Mientras el timestamp actual <= _publish_until,
+        Este callback se dispara a 50 Hz. Mientras el timestamp actual <= _publish_until,
         publica continuamente el último TwistStamped con _current_linear_x y _current_angular_z.
         """
         if time.time() <= self._publish_until:
@@ -267,7 +267,7 @@ class OrionChatMovementNode(Node):
         normalized = remove_accents(user_message.lower().replace(",", "").strip())
 
         # Modo movimiento
-        if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.8):
+        if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.7):
             resp = ("Cambiando a modo movimiento."
                     if self.current_mode != "movement"
                     else "Ya estoy en modo movimiento.")
@@ -277,7 +277,7 @@ class OrionChatMovementNode(Node):
             return
 
         # Modo conversación
-        if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.8):
+        if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.7):
             resp = ("Cambiando a modo conversación. Podemos seguir dialogando normalmente."
                     if self.current_mode != "conversation"
                     else "Ya estoy en modo conversación.")
@@ -321,7 +321,7 @@ class OrionChatMovementNode(Node):
             "sin incluir datos técnicos. "
             f"El usuario indicó: '{user_message}'."
         )
-        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."
+        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento que tu haces, tu nombre es ORION y eres un robot si el usuario dice 'orion muevete' responde con confirmacion a que tu eres el que se esta moviendo."
 
         payload = {
             "model": "gemma3:12b",
