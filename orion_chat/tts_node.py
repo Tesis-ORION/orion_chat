@@ -50,7 +50,6 @@ class OrionTTS(Node):
         timer_period = 1.0 / 50.0  # 50 Hz
         self.create_timer(timer_period, self._timer_publish_arms)    # publica brazos a 50 Hz
         self.create_timer(timer_period, self._timer_publish_vel)     # publica cmd_vel a 50 Hz
-
         # Subscriber para las respuestas de texto
         self.create_subscription(
             String, 'orion_response', self.on_response,

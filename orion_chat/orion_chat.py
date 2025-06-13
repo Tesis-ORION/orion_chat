@@ -82,8 +82,8 @@ class MovementLayer:
             err_msg = f"Error procesando comando de movimiento: {e}"
             self.logger.error(err_msg)
             return None, err_msg
-
         # Arrancamos ejecución en hilo separado
+
         threading.Thread(target=self.execute_commands, args=(command,), daemon=True).start()
         return command, "Comando recibido y en ejecución."
 
@@ -114,6 +114,7 @@ class MovementLayer:
             self._publish_until = time.time() + duration
 
             # Publicación inicial inmediata
+
             twist = TwistStamped()
             twist.header.stamp = self.pub_clock().now().to_msg()
             twist.twist.linear.x = linear_x
@@ -162,6 +163,7 @@ class MovementLayer:
         return rclpy.clock.Clock()
 
 
+
 class OrionChatMovementNode(Node):
     def __init__(self):
         super().__init__("orion_chat_movement")
@@ -171,13 +173,16 @@ class OrionChatMovementNode(Node):
             depth=10
         )
 
+
         # Suscripción de entrada y publicación de respuestas (TTS / conversación)
+
         self.create_subscription(
             String, 'orion_input', self.listener_callback, qos_profile=self.qos
         )
         self.response_pub = self.create_publisher(
             String, 'orion_response', qos_profile=self.qos
         )
+
         # NUEVO: TwistStamped en /mobile_base_controller/cmd_vel 
         self.cmd_vel_pub = self.create_publisher(
             TwistStamped, '/mobile_base_controller/cmd_vel', qos_profile=self.qos
@@ -267,6 +272,7 @@ class OrionChatMovementNode(Node):
         normalized = remove_accents(user_message.lower().replace(",", "").strip())
 
         # Modo movimiento
+
         if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.7):
             resp = ("Cambiando a modo movimiento."
                     if self.current_mode != "movement"

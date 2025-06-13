@@ -20,6 +20,7 @@ setup(
         ('share/' + package_name + '/worlds', glob.glob('worlds/*.sdf')),
         ('share/' + package_name + '/test', glob.glob('test/*.py')),
 
+
     ],
     install_requires=['setuptools'],
     zip_safe=True,
