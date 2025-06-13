@@ -8,3 +8,5 @@ sounddevice
 numpy
 loguru
 webrtcvad
+pytest
+jiwer

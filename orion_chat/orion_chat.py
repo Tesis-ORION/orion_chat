@@ -16,15 +16,11 @@ from text_to_num import text2num
 import difflib
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-
 def remove_accents(input_str):
-    """Elimina acentos y caracteres diacríticos de la cadena."""
     nfkd_form = unicodedata.normalize('NFD', input_str)
     return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
-
 def convert_number(text):
-    """Convierte el texto a un número (soporta dígitos o palabras en español)."""
     try:
         return float(text)
     except ValueError:
@@ -33,101 +29,139 @@ def convert_number(text):
         except Exception:
             return None
 
-
 class MovementLayer:
-    def __init__(self, config, cmd_vel_publisher, node_logger):
+    def __init__(self, config, cmd_vel_publisher, node_logger, parent_node):
         self.cmd_vel_pub = cmd_vel_publisher
-        self.config = config  # Contiene el RAG de movimiento
+        self.config = config
+        self.node = parent_node
         self.logger = node_logger
         self.stop_timer = None
+
+        # --- variables para “último comando” y estado de publicación continua ---
+        self._current_linear_x  = 0.0
+        self._current_angular_z = 0.0
+        self._publish_until     = 0.0  # timestamp en epoch hasta cuando publicar a 30 Hz
+
+        # Timer para publicar a 50 Hz: 1/50 = 0.05 s
+        timer_period = 1.0 / 50.0  # 50 Hz
+        # Cada 0.0333 s llamamos a _timer_publish, que publicará mientras no haya expirado la duración.
+        self._timer = self.node.create_timer(1.0 / 50.0, self._timer_publish)
 
     def process_movement_command(self, message: str):
         system_prompt = self.config.get("system_prompt", "")
         messages_payload = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
+            {"role": "user",   "content": message}
         ]
         payload = {
-            "model": "qwen2.5:3b",
+            "model": self.config.get("model", "gemma3:12b"),
             "messages": messages_payload,
-            "stream": False
+            "top_p": 1.0,
+            "stream": False,
+            "temperature": 0.0,
+            "stop": ["}", "]"]
         }
         url = "http://localhost:11434/api/chat"
         try:
+            t0 = time.perf_counter()
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
+            t1 = time.perf_counter()
+            llm_latency = (t1 - t0) * 1000
+            self.logger.info(f"[METRIC][LLM] Latencia LLM movimiento: {llm_latency:.1f} ms")
             if "message" in data and isinstance(data["message"], dict):
                 content = data["message"].get("content", "").strip()
             elif "response" in data:
                 content = data["response"].strip()
             else:
                 content = ""
-            self.logger.info(f"Respuesta del LLM para movimiento: {content}")
-            command = json.loads(content)
+            self.logger.info(f"Respuesta LLM (movimiento): {content}")
+            command = json.loads(content)  # Se asume JSON puro
         except Exception as e:
             err_msg = f"Error procesando comando de movimiento: {e}"
             self.logger.error(err_msg)
             return None, err_msg
-
+        # Arrancamos ejecución en hilo separado
 
         threading.Thread(target=self.execute_commands, args=(command,), daemon=True).start()
         return command, "Comando recibido y en ejecución."
 
     def execute_commands(self, command):
-        def execute_single_command(cmd):
-            # Parsear parámetros
+        """
+        1) Si es lista, ejecuta iterativamente cada subcomando (esperando su duration).
+        2) Si es dict, ejecuta un solo comando.
+        En cada subcomando, actualiza _current_linear_x, _current_angular_z y calcula _publish_until = now + duration.
+        Luego, el timer _timer_publish se encargará de publicar continuamente a 30 Hz hasta que expire _publish_until.
+        """
+        def execute_single(cmd):
+            # --- PARSEO DE PARÁMETROS ---
             try:
-                if "linear_x" in cmd:
-                    linear_x = float(cmd["linear_x"])
-                else:
-                    linear_x = self.config.get("default_forward", {}).get("linear_x", 0.5)
-                if "angular_z" in cmd:
-                    angular_z = float(cmd["angular_z"])
-                else:
-                    angular_z = self.config.get("default_left", {}).get("angular_z", 0.5)
-                duration = float(cmd.get("duration", self.config.get("default_forward", {}).get("duration", 5.0)))
+                linear_x = float(cmd.get("linear_x", 
+                    self.config.get("default_forward", {}).get("linear_x", 1.0)))
+                angular_z = float(cmd.get("angular_z",
+                    self.config.get("default_left", {}).get("angular_z", 1.0)))
+                duration = float(cmd.get("duration", 
+                    self.config.get("default_forward", {}).get("duration", 1.0)))
             except Exception as e:
-                self.logger.error(f"Error procesando los parámetros del comando: {e}")
+                self.logger.error(f"Error en parámetros: {e}")
                 return
 
-            # Publicar TwistStamped
+            # Guardamos valores para el timer
+            self._current_linear_x = linear_x
+            self._current_angular_z = angular_z
+            # Definimos hasta cuándo publicar (según duración)
+            self._publish_until = time.time() + duration
+
+            # Publicación inicial inmediata
+
             twist = TwistStamped()
             twist.header.stamp = self.pub_clock().now().to_msg()
             twist.twist.linear.x = linear_x
             twist.twist.angular.z = angular_z
             self.cmd_vel_pub.publish(twist)
-            self.logger.info(f"Ejecutando comando: linear_x={linear_x}, angular_z={angular_z}, duration={duration}")
+            self.logger.info(f"Ejecutando: lx={linear_x}, az={angular_z}, dur={duration}")
 
-            if duration > 0:
-                def stop_robot():
-                    stop_msg = TwistStamped()
-                    stop_msg.header.stamp = self.pub_clock().now().to_msg()
-                    stop_msg.twist.linear.x = 0.0
-                    stop_msg.twist.angular.z = 0.0
-                    self.cmd_vel_pub.publish(stop_msg)
-                    self.logger.info("Comando finalizado, robot detenido.")
-                self.stop_timer = threading.Timer(duration, stop_robot)
-                self.stop_timer.daemon = True
-                self.stop_timer.start()
+            # Si duration = 0, hacemos un “stop” inmediato (silencioso)
+            if duration <= 0:
+                self._publish_until = 0.0
+                stop_msg = TwistStamped()
+                stop_msg.header.stamp = self.pub_clock().now().to_msg()
+                stop_msg.twist.linear.x = 0.0
+                stop_msg.twist.angular.z = 0.0
+                self.cmd_vel_pub.publish(stop_msg)
+                self.logger.info("Duración 0: robot detenido inmediatamente.")
 
-
-        # Ejecutar ya sea lista o dict
-
+        # Ejecución secuencial de lista o único dict
         if isinstance(command, list):
-            for cmd in command:
-                execute_single_command(cmd)
+            for subcmd in command:
+                execute_single(subcmd)
+                # Esperamos la duración completa + pequeño margen antes de pasar al siguiente
                 try:
-                    dur = float(cmd.get("duration", self.config.get("default_forward", {}).get("duration", 5.0)))
+                    d = float(subcmd.get("duration", 
+                        self.config.get("default_forward", {}).get("duration", 1.0)))
                 except Exception:
-                    dur = self.config.get("default_forward", {}).get("duration", 5.0)
-                time.sleep(dur + 0.1)
+                    d = self.config.get("default_forward", {}).get("duration", 1.0)
+                time.sleep(d + 0.1)
         else:
-            execute_single_command(command)
+            execute_single(command)
+
+    def _timer_publish(self):
+        """
+        Este callback se dispara a 50 Hz. Mientras el timestamp actual <= _publish_until,
+        publica continuamente el último TwistStamped con _current_linear_x y _current_angular_z.
+        """
+        if time.time() <= self._publish_until:
+            twist = TwistStamped()
+            twist.header.stamp = self.pub_clock().now().to_msg()
+            twist.twist.linear.x = self._current_linear_x
+            twist.twist.angular.z = self._current_angular_z
+            self.cmd_vel_pub.publish(twist)
+        # Si ya expiró la duración, nada que hacer; el último stop se envió manualmente.
 
     def pub_clock(self):
-        # Necesario para obtener un clock que genere timestamps
         return rclpy.clock.Clock()
+
 
 
 class OrionChatMovementNode(Node):
@@ -139,31 +173,35 @@ class OrionChatMovementNode(Node):
             depth=10
         )
 
-        # Subscripciones y publicaciones
+
+        # Suscripción de entrada y publicación de respuestas (TTS / conversación)
+
         self.create_subscription(
             String, 'orion_input', self.listener_callback, qos_profile=self.qos
         )
         self.response_pub = self.create_publisher(
             String, 'orion_response', qos_profile=self.qos
         )
-        # ¡Cambio aquí! TwistStamped en /mobile_base_controller/cmd_vel
+
+        # NUEVO: TwistStamped en /mobile_base_controller/cmd_vel 
         self.cmd_vel_pub = self.create_publisher(
             TwistStamped, '/mobile_base_controller/cmd_vel', qos_profile=self.qos
         )
 
-        # Carga de configuración
+        # Carga de configuración 
         self.movement_config = self.load_resource("movement_config.json")
         self.conversation_config = self.load_resource("conversation_config.json")
 
-        # Capa de movimiento
+        # Capa de movimiento con puntero a publisher de cmd_vel
         self.movement_layer = MovementLayer(
             self.movement_config,
             self.cmd_vel_pub,
-            self.get_logger()
+            self.get_logger(),
+            self
         )
 
         # Estados y llaves para cambiar modo
-        self.chat_history = deque(maxlen=10)
+        self.chat_history = deque(maxlen=100)
         self.last_message = None
         self.is_processing = False
         self.current_mode = "conversation"
@@ -200,7 +238,6 @@ class OrionChatMovementNode(Node):
 
     def emotion_callback(self, msg: String):
         self.current_emotion = msg.data
-        self.get_logger().info(f"Emoción actualizada a: {self.current_emotion}")
 
     def load_resource(self, filename):
         try:
@@ -235,7 +272,8 @@ class OrionChatMovementNode(Node):
         normalized = remove_accents(user_message.lower().replace(",", "").strip())
 
         # Modo movimiento
-        if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.8):
+
+        if difflib.get_close_matches(normalized, self.movement_keys, n=1, cutoff=0.7):
             resp = ("Cambiando a modo movimiento."
                     if self.current_mode != "movement"
                     else "Ya estoy en modo movimiento.")
@@ -245,7 +283,7 @@ class OrionChatMovementNode(Node):
             return
 
         # Modo conversación
-        if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.8):
+        if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.7):
             resp = ("Cambiando a modo conversación. Podemos seguir dialogando normalmente."
                     if self.current_mode != "conversation"
                     else "Ya estoy en modo conversación.")
@@ -256,13 +294,15 @@ class OrionChatMovementNode(Node):
 
         # Procesamiento según modo
         if self.current_mode == "movement":
+            # Llamamos a process_movement_command, que iniciará execute_commands en fondo
             threading.Thread(target=self.handle_movement_command,
-                             args=(user_message,), daemon=True).start()
+                            args=(user_message,), daemon=True).start()
             self.is_processing = False
         else:
+            # Modo conversación (igual que antes)
             augmented = self.generate_augmented_prompt(user_message)
             threading.Thread(target=self.process_stream,
-                             args=(augmented,), daemon=True).start()
+                            args=(augmented,), daemon=True).start()
             self.is_processing = False
 
     def handle_movement_command(self, user_message):
@@ -287,10 +327,10 @@ class OrionChatMovementNode(Node):
             "sin incluir datos técnicos. "
             f"El usuario indicó: '{user_message}'."
         )
-        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento de robots."
+        system_prompt = "Eres un experto en dar respuestas naturales para confirmar acciones de movimiento que tu haces, tu nombre es ORION y eres un robot si el usuario dice 'orion muevete' responde con confirmacion a que tu eres el que se esta moviendo."
 
         payload = {
-            "model": "gemma3",
+            "model": "gemma3:12b",
             "messages": [
                 {"role": "system",   "content": system_prompt},
                 {"role": "user",     "content": confirmation_prompt}
@@ -359,7 +399,7 @@ class OrionChatMovementNode(Node):
             f"Contexto reciente:\n{history_text}\n\n"
             f"Documentos adicionales:\n{external_document}\n\n"
             f"Pregunta del usuario: {user_message}\n\n"
-            f"Responde de forma natural y breve, y formatea la salida como \"[{self.current_emotion}]: respuesta\"."
+            f"Responde de forma natural y breve, y a demas que la respuesta sea reactiva a {self.current_emotion} es decir que esta emocion se vea reflejada en tu forma de responder."
         )
         return prompt
 
@@ -373,14 +413,17 @@ class OrionChatMovementNode(Node):
             {"role": "user", "content": augmented_prompt}
         ]
         payload = {
-            "model": "gemma3",
+            "model": "gemma3:12b",
             "messages": messages,
             "stream": True
         }
         url = "http://localhost:11434/api/chat"
         try:
+            t0 = time.perf_counter()
             response = requests.post(url, json=payload, stream=True)
             response.raise_for_status()
+            t1 = time.perf_counter()
+            self.get_logger().info(f"[METRIC][LLM] Conversational LLM latency (setup): {(t1 - t0)*1000:.1f} ms")
         except Exception as e:
             self.get_logger().error(f"Error al comunicarse con Ollama: {e}")
             return

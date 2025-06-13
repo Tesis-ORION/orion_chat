@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from time import perf_counter
 import uuid
 import queue
 import struct
@@ -77,6 +78,7 @@ class AudioRecorder(Node):
                     if is_speech:
                         speech_count += 1
                         if speech_count > self.min_speech_frames:
+                            start_time = perf_counter() 
                             # Utterance START
                             uid = str(uuid.uuid4())
                             self.pub_web.publish(Bool(data=False))
@@ -100,16 +102,22 @@ class AudioRecorder(Node):
                     if not is_speech:
                         silence_count += 1
                         if silence_count > self.max_silence_frames:
+                            end_time = perf_counter()   
                             # Utterance END
                             full_data = b''.join(speech_frames)
                             # Convertir a float32 para AudioData
                             pcm = np.frombuffer(full_data, dtype=np.int16).astype(np.float32) / 32768.0
                             msg = AudioData()
                             msg.data = pcm.flatten().tolist()
+                            duration_ms = len(speech_frames) * self.frame_ms
                             self.pub_data.publish(msg)
                             self.get_logger().info(
                                 f"Utterance END uuid={uid}, frames={len(speech_frames)}"
                             )
+                            self.get_logger().info(
+                                f"[METRIC][Audio] Utterance duration: {duration_ms:.1f} ms, frames: {len(speech_frames)}"
+                            )
+                            start_time = None
                             # Reset
                             in_speech = False
                             speech_count = 0
