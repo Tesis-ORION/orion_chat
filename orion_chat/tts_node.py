@@ -16,6 +16,11 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 class OrionTTS(Node):
     def __init__(self):
         super().__init__('orion_tts')
+        
+        # Parámetro para controlar si manejar cmd_vel
+        self.declare_parameter('enable_base_control', True)
+        self.enable_base_control = self.get_parameter('enable_base_control').get_parameter_value().bool_value
+        
         # Histórico de movimientos de base
         self._base_history = []
         # QoS para asegurar entrega fiable
@@ -35,11 +40,15 @@ class OrionTTS(Node):
             '/simple_right_arm_controller/commands',
             self.qos
         )
-        self.pub_cmd_vel   = self.create_publisher(
-            TwistStamped,
-            '/mobile_base_controller/cmd_vel',
-            self.qos
-        )
+        
+        # Publisher cmd_vel solo si está habilitado
+        self.pub_cmd_vel = None
+        if self.enable_base_control:
+            self.pub_cmd_vel = self.create_publisher(
+                TwistStamped,
+                '/mobile_base_controller/cmd_vel',
+                self.qos
+            )
 
         # Variables para llevar el “último comando” de brazos y base
         self._current_left_angle  = 0.0
@@ -49,7 +58,8 @@ class OrionTTS(Node):
         # Timers para republicar continuamente a 50 Hz
         timer_period = 1.0 / 50.0  # 50 Hz
         self.create_timer(timer_period, self._timer_publish_arms)    # publica brazos a 50 Hz
-        self.create_timer(timer_period, self._timer_publish_vel)     # publica cmd_vel a 50 Hz
+        if self.enable_base_control:
+            self.create_timer(timer_period, self._timer_publish_vel) # publica cmd_vel a 50 Hz
         # Subscriber para las respuestas de texto
         self.create_subscription(
             String, 'orion_response', self.on_response,
@@ -79,7 +89,9 @@ class OrionTTS(Node):
             t.start()
         # Hilo de vida autónoma
         threading.Thread(target=self.autonomous_life_loop, daemon=True).start()
-        self.get_logger().info("Nodo OrionTTS inicializado y en ejecución.")
+        
+        base_status = "habilitado" if self.enable_base_control else "deshabilitado"
+        self.get_logger().info(f"Nodo OrionTTS inicializado - Control de base: {base_status}.")
 
     def on_response(self, msg):
         text = msg.data.strip()
@@ -214,11 +226,12 @@ class OrionTTS(Node):
     def publish_base_turn(self, speed=0.0):
         """Guarda la última velocidad y publica inmediatamente."""
         self._current_speed = speed
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.twist.linear.x = 0.0
-        msg.twist.angular.z = speed
-        self.pub_cmd_vel.publish(msg)
+        if self.enable_base_control and self.pub_cmd_vel is not None:
+            msg = TwistStamped()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.twist.linear.x = 0.0
+            msg.twist.angular.z = speed
+            self.pub_cmd_vel.publish(msg)
 
     # --- callbacks periódicos a 50 Hz para brazos y cmd_vel ---
     def _timer_publish_arms(self):
@@ -234,23 +247,25 @@ class OrionTTS(Node):
 
     def _timer_publish_vel(self):
         # Publica la última velocidad guardada a 50 Hz
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.twist.linear.x = 0.0
-        msg.twist.angular.z = self._current_speed
-        self.pub_cmd_vel.publish(msg)
+        if self.enable_base_control and self.pub_cmd_vel is not None:
+            msg = TwistStamped()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.twist.linear.x = 0.0
+            msg.twist.angular.z = self._current_speed
+            self.pub_cmd_vel.publish(msg)
 
     def _recorded_base_turn(self, speed: float, duration: float):
         """Publica cmd_vel, guarda en el historial y espera la duración."""
-        # Publicar
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.twist.linear.x = 0.0
-        msg.twist.angular.z = speed
-        self.pub_cmd_vel.publish(msg)
+        if self.enable_base_control and self.pub_cmd_vel is not None:
+            # Publicar
+            msg = TwistStamped()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.twist.linear.x = 0.0
+            msg.twist.angular.z = speed
+            self.pub_cmd_vel.publish(msg)
 
-        # Registrar para luego invertir
-        self._base_history.append((speed, duration))
+            # Registrar para luego invertir
+            self._base_history.append((speed, duration))
 
         # Esperar
         time.sleep(duration)
@@ -303,7 +318,8 @@ class OrionTTS(Node):
 
     def send_stop_signals(self):
         self.publish_arm_positions(0.0, 0.0)
-        self.publish_base_turn(0.0)
+        if self.enable_base_control:
+            self.publish_base_turn(0.0)
         self._stream.stop_stream()
         self._stream.close()
         self._pa.terminate()

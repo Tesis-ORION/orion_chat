@@ -34,6 +34,7 @@ setup(
             'orion_chat = orion_chat.orion_chat:main',  # Nodo de chat principal
             'orion_tts = orion_chat.tts_node:main',  # Nodo de Text-to-Speech
             'orion_stt = orion_chat.stt_node:main',  # Nodo de Speech-to-Text
+            'orion_arms_control = orion_chat.arms_control_node:main',  # Control independiente de brazos
             'audio_recorder = orion_chat.audio_recorder:main',  # Nodo del grabador de audio
             'audio_player = orion_chat.audio_player:main',  # Nodo del reproductor de audio
         ],
