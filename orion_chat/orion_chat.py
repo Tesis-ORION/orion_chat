@@ -93,7 +93,13 @@ class MovementLayer:
         2) Si es dict, ejecuta un solo comando.
         En cada subcomando, actualiza _current_linear_x, _current_angular_z y calcula _publish_until = now + duration.
         Luego, el timer _timer_publish se encargará de publicar continuamente a 30 Hz hasta que expire _publish_until.
+        Solo ejecuta movimientos si el nodo está en modo movimiento.
         """
+        # Verificar que estamos en modo movimiento antes de ejecutar
+        if not (hasattr(self.node, 'current_mode') and self.node.current_mode == "movement"):
+            self.logger.warning("Comando de movimiento ignorado: no estamos en modo movimiento")
+            return
+            
         def execute_single(cmd):
             # --- PARSEO DE PARÁMETROS ---
             try:
@@ -150,13 +156,16 @@ class MovementLayer:
         """
         Este callback se dispara a 50 Hz. Mientras el timestamp actual <= _publish_until,
         publica continuamente el último TwistStamped con _current_linear_x y _current_angular_z.
+        Solo publica si el nodo padre está en modo movimiento.
         """
-        if time.time() <= self._publish_until:
-            twist = TwistStamped()
-            twist.header.stamp = self.pub_clock().now().to_msg()
-            twist.twist.linear.x = self._current_linear_x
-            twist.twist.angular.z = self._current_angular_z
-            self.cmd_vel_pub.publish(twist)
+        # Solo publicar comandos de velocidad si estamos en modo movimiento
+        if hasattr(self.node, 'current_mode') and self.node.current_mode == "movement":
+            if time.time() <= self._publish_until:
+                twist = TwistStamped()
+                twist.header.stamp = self.pub_clock().now().to_msg()
+                twist.twist.linear.x = self._current_linear_x
+                twist.twist.angular.z = self._current_angular_z
+                self.cmd_vel_pub.publish(twist)
         # Si ya expiró la duración, nada que hacer; el último stop se envió manualmente.
 
     def pub_clock(self):
@@ -284,6 +293,10 @@ class OrionChatMovementNode(Node):
 
         # Modo conversación
         if difflib.get_close_matches(normalized, self.conversation_keys, n=1, cutoff=0.7):
+            # Si cambiamos de movimiento a conversación, detener cualquier movimiento pendiente
+            if self.current_mode == "movement":
+                self.stop_robot_movement()
+            
             resp = ("Cambiando a modo conversación. Podemos seguir dialogando normalmente."
                     if self.current_mode != "conversation"
                     else "Ya estoy en modo conversación.")
@@ -478,6 +491,21 @@ class OrionChatMovementNode(Node):
             msg.data = f"[ORION]: {clean_text}"
         self.response_pub.publish(msg)
         self.get_logger().info(f"Respuesta publicada: {msg.data}")
+
+    def stop_robot_movement(self):
+        """Detiene inmediatamente cualquier movimiento del robot."""
+        # Detener cualquier movimiento pendiente en la capa de movimiento
+        self.movement_layer._publish_until = 0.0
+        self.movement_layer._current_linear_x = 0.0
+        self.movement_layer._current_angular_z = 0.0
+        
+        # Enviar comando de stop inmediato
+        stop_msg = TwistStamped()
+        stop_msg.header.stamp = self.get_clock().now().to_msg()
+        stop_msg.twist.linear.x = 0.0
+        stop_msg.twist.angular.z = 0.0
+        self.cmd_vel_pub.publish(stop_msg)
+        self.get_logger().info("Robot detenido al cambiar a modo conversación")
 
 
 def main(args=None):
