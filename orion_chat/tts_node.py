@@ -18,7 +18,7 @@ class OrionTTS(Node):
         super().__init__('orion_tts')
         
         # Parámetro para controlar si manejar cmd_vel
-        self.declare_parameter('enable_base_control', True)
+        self.declare_parameter('enable_base_control', False)
         self.enable_base_control = self.get_parameter('enable_base_control').get_parameter_value().bool_value
         
         # Histórico de movimientos de base
